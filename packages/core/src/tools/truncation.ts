@@ -73,6 +73,57 @@ export const COMBINED_PASS_TOLERANCE_FACTOR = 2;
 export const TRUNCATION_FALLBACK_ENVELOPE_SLACK = 500;
 
 /**
+ * 诊断行匹配模式：识别测试失败、断言错误、编译器错误以及异常栈追踪。
+ * 当工具输出被截断时，这些诊断信息最为关键，如果被截断在中间会导致代理盲目试错或额外消耗轮次读取文件。
+ */
+export const DIAGNOSTIC_PATTERNS: RegExp[] = [
+  /^\s*(?:FAIL|✕|✗|ERROR|FATAL)\b/i,
+  /\bAssertionError\b/,
+  /\bExpected:|\bReceived:/,
+  /\berror\s+TS\d+:/i,
+  /Traceback \(most recent call last\):/,
+  /--- FAIL:/,
+  /\bpanicked at\b/,
+];
+
+/**
+ * 从被截断的中间行切片中提取关键诊断错误行（如失败的测试用例、断言信息及报错行）。
+ * 保证模型在工具输出截断时仍能第一时间直接感知确切的失败根因，无需发起后续读取请求。
+ */
+export function extractDiagnosticLines(
+  lines: string[],
+  startIndex: number,
+  endIndex: number,
+  maxLines = 10,
+): Array<{ lineIndex: number; text: string }> {
+  const matches: Array<{ lineIndex: number; text: string }> = [];
+  const start = Math.max(0, startIndex);
+  const end = Math.min(lines.length, endIndex);
+  for (let i = start; i < end && matches.length < maxLines; i++) {
+    const line = lines[i]!;
+    if (DIAGNOSTIC_PATTERNS.some((pattern) => pattern.test(line))) {
+      matches.push({ lineIndex: i + 1, text: line });
+      // 提取错误行紧随的上下文行（如堆栈提示或断言对比）
+      let extra = 1;
+      while (
+        i + extra < end &&
+        extra <= 2 &&
+        matches.length < maxLines &&
+        (lines[i + extra]!.trimStart().startsWith('at ') ||
+          lines[i + extra]!.includes('Expected:') ||
+          lines[i + extra]!.includes('Received:') ||
+          lines[i + extra]!.trimStart().startsWith('> '))
+      ) {
+        matches.push({ lineIndex: i + extra + 1, text: lines[i + extra]! });
+        extra++;
+      }
+      i += extra - 1;
+    }
+  }
+  return matches;
+}
+
+/**
  * Truncates large tool output and saves the full content to a temp file.
  * Used by the shell tool to prevent excessively large outputs from being
  * sent to the LLM context.
@@ -129,12 +180,37 @@ export async function truncateAndSaveToFile(
     headCount = Math.max(Math.floor(effectiveLines / 5), 1);
     tailCount = effectiveLines - headCount;
   }
-  const separator = '\n\n---\n... [CONTENT TRUNCATED] ...\n---\n\n';
+  const defaultSeparator = '\n\n---\n... [CONTENT TRUNCATED] ...\n---\n\n';
+  let diagnosticBlock = '';
+  if (keep === 'both' && lines.length > effectiveLines) {
+    const omittedStart = headCount;
+    const omittedEnd = Math.max(omittedStart, lines.length - tailCount);
+    const diagnostics = extractDiagnosticLines(
+      lines,
+      omittedStart,
+      omittedEnd,
+      10,
+    );
+    if (diagnostics.length > 0) {
+      diagnosticBlock =
+        '\n\n[Key Diagnostic Excerpts from Truncated Output]:\n' +
+        diagnostics.map((d) => `  (Line ${d.lineIndex}): ${d.text}`).join('\n');
+    }
+  }
+  const candidateSeparator = diagnosticBlock
+    ? `\n\n---\n... [CONTENT TRUNCATED] ...${diagnosticBlock}\n---\n\n`
+    : defaultSeparator;
+  const previewBudget = Math.max(0, previewChars);
+  // 当诊断摘录过大导致剩余展示预算不足1/3时，回退到默认紧凑分隔符以保证首尾关键行展示
+  const separator =
+    diagnosticBlock &&
+    previewBudget - candidateSeparator.length < Math.floor(previewBudget / 3)
+      ? defaultSeparator
+      : candidateSeparator;
   const ellipsis = '...';
 
   // Collect head lines within budget. If a single line exceeds the
   // remaining budget, include a truncated slice of it.
-  const previewBudget = Math.max(0, previewChars);
 
   // The separator sits between (or beside) the head and tail, so it has to
   // come out of the budget rather than be added on top of it. It was emitted

@@ -146,6 +146,29 @@ const toolItem = (overrides: Partial<LiveToolItem> = {}): LiveToolItem => ({
 });
 
 describe('OpenTuiTranscriptView', () => {
+  it('shows successful file-change counts beside the tool action', () => {
+    const { container } = render(
+      <OpenTuiTranscriptView
+        items={[
+          toolItem({
+            tool: 'edit_file',
+            title: 'edit_file',
+            done: true,
+            success: true,
+            diff: {
+              fileDiff: 'diff',
+              fileName: 'app.ts',
+              diffStat: { model_added_lines: 23, model_removed_lines: 3 },
+            },
+          }),
+        ]}
+      />,
+    );
+    expect(container.textContent).toContain('(+23)(-3)');
+    expect(container.querySelector('[data-fg="#A6E3A1"]')).not.toBeNull();
+    expect(container.querySelector('[data-fg="#F38BA8"]')).not.toBeNull();
+  });
+
   it('shows the exact executing shell focus hint and removes it from completed or unrelated cards', () => {
     const view = render(
       <OpenTuiTranscriptView items={[toolItem()]} activeShellCallId="t1" />,

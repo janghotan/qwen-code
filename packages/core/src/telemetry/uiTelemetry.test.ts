@@ -240,6 +240,58 @@ describe('UiTelemetryService', () => {
     expect(lastPromptTokenCount).toBe(0);
   });
 
+  it('tracks provider-reported session totals and makes missing totals unknown', () => {
+    const sessionId = 'reported-usage';
+    expect(service.getProviderReportedTotalTokens(sessionId)).toBe(0);
+    service.addEvent(apiResponse('model', 1, [100, 20, 120, 80, 0]), sessionId);
+    service.addEvent(apiResponse('model', 1, [40, 10, 50, 0, 0]), sessionId);
+    expect(service.getProviderReportedTotalTokens(sessionId)).toBe(170);
+
+    service.addEvent(apiResponse('model', 1, [10, 5, 0, 0, 0]), sessionId);
+    expect(service.getProviderReportedTotalTokens(sessionId)).toBeNull();
+    service.addEvent(apiResponse('model', 1, [10, 5, 15, 0, 0]), sessionId);
+    expect(service.getProviderReportedTotalTokens(sessionId)).toBeNull();
+  });
+
+  it('clears provider-reported session totals on reset and removal', () => {
+    const sessionId = 'reported-usage';
+    service.addEvent(proResponse(), sessionId);
+    expect(service.getProviderReportedTotalTokens(sessionId)).toBe(30);
+    service.resetSession(sessionId);
+    expect(service.getProviderReportedTotalTokens(sessionId)).toBe(0);
+    service.addEvent(proResponse(), sessionId);
+    service.removeSession(sessionId);
+    expect(service.getProviderReportedTotalTokens(sessionId)).toBeNull();
+  });
+
+  it('restores exact-or-unknown usage across a failed session replay', () => {
+    const sessionId = 'reported-usage-replay';
+    service.addEvent(proResponse(), sessionId);
+    const snapshot = service.snapshotForReplay(sessionId);
+    service.addEvent(apiResponse('model', 1, [1, 1, 0, 0, 0]), sessionId);
+    expect(service.getProviderReportedTotalTokens(sessionId)).toBeNull();
+    service.restoreFromReplaySnapshot(snapshot);
+    expect(service.getProviderReportedTotalTokens(sessionId)).toBe(30);
+
+    service.restoreSessionModelMetrics(
+      sessionId,
+      service.getMetricsForSession(sessionId).models,
+    );
+    expect(service.getProviderReportedTotalTokens(sessionId)).toBe(30);
+    const historical = new UiTelemetryService();
+    historical.addEvent(
+      apiResponse('model', 1, [10, 0, 10, 0, 0]),
+      'source-session',
+    );
+    service.restoreSessionModelMetrics(
+      'historical-only',
+      historical.getMetricsForSession('source-session').models,
+    );
+    expect(
+      service.getProviderReportedTotalTokens('historical-only'),
+    ).toBeNull();
+  });
+
   it('passes the added event to update listeners', () => {
     const spy = vi.fn();
     service.on('update', spy);

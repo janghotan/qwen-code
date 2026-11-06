@@ -970,6 +970,7 @@ function ToolCard({
       : TOOL_CARD_DESCRIPTION_ROWS,
   );
   const suffix = toolCardSummarySuffix(item.done, item.summary);
+  const diffStat = item.done && item.success ? item.diff?.diffStat : undefined;
   // ink measures the args row against the header's own inner width (the status
   // glyph's columns are not available to it), so the wrapped-row cap bounds
   // what actually reaches the screen.
@@ -1008,6 +1009,7 @@ function ToolCard({
             >
               {name}
             </text>
+            {diffStat ? <ToolDiffStats diffStat={diffStat} /> : null}
             <text
               key="hint"
               fg={C.dim}
@@ -1030,6 +1032,7 @@ function ToolCard({
             {suffix ? (
               <span fg={C.dim}>{sanitizeTerminalText(suffix)}</span>
             ) : null}
+            {diffStat ? <ToolDiffStats diffStat={diffStat} asSpan /> : null}
             {awaitingApproval ? (
               // ink's TrailingIndicator: a primary-coloured arrow at the end of
               // the awaiting call's own row, not a row of its own.
@@ -1075,6 +1078,22 @@ function ToolCard({
       )}
     </box>
   );
+}
+
+function ToolDiffStats({
+  diffStat,
+  asSpan = false,
+}: {
+  diffStat: { model_added_lines: number; model_removed_lines: number };
+  asSpan?: boolean;
+}) {
+  const content = (
+    <>
+      <span fg={C.green}>{` (+${diffStat.model_added_lines})`}</span>
+      <span fg={C.red}>{`(-${diffStat.model_removed_lines})`}</span>
+    </>
+  );
+  return asSpan ? content : <text>{content}</text>;
 }
 
 function ToolCardBody({

@@ -958,6 +958,40 @@ describe('WorkflowOrchestrator', () => {
     expect(budgetUpdates).toEqual([{ spent: 0, total: null }]);
   });
 
+  it('refuses optional dispatches at the provider quota entry gate', async () => {
+    const dispatch = vi.fn(async () => 'unused');
+    const budget = new WorkflowBudgetImpl(null);
+    vi.spyOn(budget, 'providerQuotaState').mockReturnValue({
+      limit: 100,
+      used: 100,
+    });
+    await expect(
+      runWf({ dispatch, script: `return await agent('optional');`, budget }),
+    ).rejects.toThrow(/Provider token quota reached \(100 \/ 100\)/);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('rechecks provider quota when queued dispatches acquire a slot', async () => {
+    let used = 0;
+    const dispatch = vi.fn(async () => {
+      used = 100;
+      return 'ok';
+    });
+    const budget = new WorkflowBudgetImpl(null);
+    vi.spyOn(budget, 'providerQuotaState').mockImplementation(() => ({
+      limit: 100,
+      used,
+    }));
+    const outcome = await runWf({
+      dispatch,
+      script: `return await parallel([() => agent('first'), () => agent('second')]);`,
+      budget,
+      scheduler: new WorkflowDispatchScheduler(1),
+    });
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(outcome.result).toEqual(['ok', null]);
+  });
+
   // ── P5 T4: budgetUpdated emitter event ─────────────────────────────────
 
   it('P5 T4: budgetUpdated fires after each successful completion with cumulative spent + total', async () => {

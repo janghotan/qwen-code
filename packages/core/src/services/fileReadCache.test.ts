@@ -703,5 +703,24 @@ describe('FileReadCache', () => {
       expect(cache.evictNotAccessedSince(0.0000001)).toBe(0);
       expect(cache.size()).toBe(1);
     });
+
+    // 测试读取范围记录与历史淘汰行为
+    it('tracks lastReadRange and clears it on history eviction', () => {
+      const stats = makeStats({ ino: 42 });
+      const entry = cache.recordRead('/x/range.ts', stats, {
+        full: false,
+        cacheable: true,
+        range: { offset: 10, limit: 50 },
+      });
+      expect(entry.lastReadRange).toEqual({ offset: 10, limit: 50 });
+
+      // 当历史被微压缩清理时，范围记录也被重置
+      cache.markReadEvictedFromHistory(stats);
+      const checked = cache.check(stats);
+      expect(checked.state).toBe('fresh');
+      if (checked.state === 'fresh') {
+        expect(checked.entry.lastReadRange).toBeUndefined();
+      }
+    });
   });
 });

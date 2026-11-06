@@ -39,6 +39,23 @@ export type { GlobPath } from './glob-search.js';
 
 const debugLogger = createDebugLogger('GLOB');
 
+/**
+ * 缓存的 Glob 目录检索结果，结合 FileReadCache 的 writeGeneration 保持有效性。
+ */
+interface CachedGlobDirectoryResult {
+  writeGeneration: number;
+  entries: GlobPath[];
+  hitLimit: boolean;
+}
+
+const globDirectoryCache = new Map<string, CachedGlobDirectoryResult>();
+const MAX_GLOB_CACHE_ENTRIES = 64;
+
+/** 清除 Glob 搜索内存缓存（用于测试或会话重置）。 */
+export function clearGlobSearchCache(): void {
+  globDirectoryCache.clear();
+}
+
 const MAX_FILE_COUNT = 100;
 const MAX_GLOB_COLLECTED_ENTRIES = MAX_FILE_COUNT * 10;
 const normalizePathForComparison = (p: string) =>
@@ -160,6 +177,23 @@ class GlobToolInvocation extends BaseToolInvocation<
     signal: AbortSignal,
     entryLimit: number,
   ): Promise<{ entries: GlobPath[]; hitLimit: boolean }> {
+    // 检查是否有未发生写入的幂等缓存结果
+    const cacheDisabled = this.config.getFileReadCacheDisabled?.();
+    const fileCache = this.config.getFileReadCache?.();
+    const currentWriteGen = fileCache?.getWriteGeneration?.() ?? -1;
+    const cacheKey = `${searchDir}\0${pattern}\0${entryLimit}`;
+
+    if (!cacheDisabled && fileCache && globDirectoryCache.has(cacheKey)) {
+      const cached = globDirectoryCache.get(cacheKey)!;
+      if (cached.writeGeneration === currentWriteGen) {
+        debugLogger.debug('glob-cache-hit', { key: cacheKey });
+        return {
+          entries: [...cached.entries],
+          hitLimit: cached.hitLimit,
+        };
+      }
+    }
+
     const options: GlobDirectorySearch = {
       searchDir,
       pattern,
@@ -169,65 +203,80 @@ class GlobToolInvocation extends BaseToolInvocation<
       containmentRoot: this.containmentRoot,
     };
     const timeoutMs = this.executionTimeoutMs;
+    let result: { entries: GlobPath[]; hitLimit: boolean };
     if (timeoutMs === undefined) {
-      return searchGlobDirectory(options, this.fileService, signal);
+      result = await searchGlobDirectory(options, this.fileService, signal);
+    } else {
+      signal.throwIfAborted();
+      // A timer on the matching thread cannot interrupt a backtracking regexp.
+      const workerFile = path.join(
+        resolveBundleDir(import.meta.url),
+        'glob-search-worker.js',
+      );
+      // tsx must register its loader inside a worker running source files.
+      const workerEntry =
+        import.meta.url.endsWith('.ts') && !existsSync(workerFile)
+          ? new URL(
+              `data:text/javascript,${encodeURIComponent(
+                `import { register } from ${JSON.stringify(import.meta.resolve('tsx/esm/api'))}; register(); await import(${JSON.stringify(new URL('./glob-search-worker.ts', import.meta.url).href)});`,
+              )}`,
+            )
+          : workerFile;
+      const worker = new Worker(workerEntry, { workerData: options });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let onAbort = () => {};
+      try {
+        result = await new Promise<{ entries: GlobPath[]; hitLimit: boolean }>(
+          (resolve, reject) => {
+            onAbort = () => reject(signal.reason);
+            worker.once('message', (reply: GlobDirectoryReply) =>
+              resolve({
+                entries: reply.entries.map((entry) => ({
+                  fullpath: () => entry.path,
+                  mtimeMs: entry.mtimeMs,
+                })),
+                hitLimit: reply.hitLimit,
+              }),
+            );
+            worker.once('error', () =>
+              reject(new Error('Glob search worker failed.')),
+            );
+            worker.once('exit', () =>
+              reject(new Error('Glob search worker exited before a result.')),
+            );
+            timer = setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    `Glob search exceeded ${timeoutMs / 1000} seconds. Narrow the pattern or path and retry.`,
+                  ),
+                ),
+              timeoutMs,
+            );
+            signal.addEventListener('abort', onAbort, { once: true });
+            if (signal.aborted) onAbort();
+          },
+        );
+      } finally {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', onAbort);
+        await worker.terminate();
+      }
     }
 
-    signal.throwIfAborted();
-    // A timer on the matching thread cannot interrupt a backtracking regexp.
-    const workerFile = path.join(
-      resolveBundleDir(import.meta.url),
-      'glob-search-worker.js',
-    );
-    // tsx must register its loader inside a worker running source files.
-    const workerEntry =
-      import.meta.url.endsWith('.ts') && !existsSync(workerFile)
-        ? new URL(
-            `data:text/javascript,${encodeURIComponent(
-              `import { register } from ${JSON.stringify(import.meta.resolve('tsx/esm/api'))}; register(); await import(${JSON.stringify(new URL('./glob-search-worker.ts', import.meta.url).href)});`,
-            )}`,
-          )
-        : workerFile;
-    const worker = new Worker(workerEntry, { workerData: options });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let onAbort = () => {};
-    try {
-      return await new Promise<{ entries: GlobPath[]; hitLimit: boolean }>(
-        (resolve, reject) => {
-          onAbort = () => reject(signal.reason);
-          worker.once('message', (reply: GlobDirectoryReply) =>
-            resolve({
-              entries: reply.entries.map((entry) => ({
-                fullpath: () => entry.path,
-                mtimeMs: entry.mtimeMs,
-              })),
-              hitLimit: reply.hitLimit,
-            }),
-          );
-          worker.once('error', () =>
-            reject(new Error('Glob search worker failed.')),
-          );
-          worker.once('exit', () =>
-            reject(new Error('Glob search worker exited before a result.')),
-          );
-          timer = setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `Glob search exceeded ${timeoutMs / 1000} seconds. Narrow the pattern or path and retry.`,
-                ),
-              ),
-            timeoutMs,
-          );
-          signal.addEventListener('abort', onAbort, { once: true });
-          if (signal.aborted) onAbort();
-        },
-      );
-    } finally {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', onAbort);
-      await worker.terminate();
+    if (!cacheDisabled && fileCache) {
+      if (globDirectoryCache.size >= MAX_GLOB_CACHE_ENTRIES) {
+        const oldest = globDirectoryCache.keys().next().value;
+        if (oldest !== undefined) globDirectoryCache.delete(oldest);
+      }
+      globDirectoryCache.set(cacheKey, {
+        writeGeneration: currentWriteGen,
+        entries: [...result.entries],
+        hitLimit: result.hitLimit,
+      });
     }
+
+    return result;
   }
 
   async execute(signal: AbortSignal): Promise<ToolResult> {

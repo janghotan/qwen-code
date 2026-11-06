@@ -32,6 +32,22 @@ import { recordGrepResultFileReads } from './grepReadTracking.js';
 
 const debugLogger = createDebugLogger('GREP');
 
+/**
+ * 缓存的 Grep 搜索结果，结合 FileReadCache 的 writeGeneration 感知文件变更。
+ */
+interface CachedGrepSearch {
+  writeGeneration: number;
+  matches: GrepMatch[];
+}
+
+const grepSearchCache = new Map<string, CachedGrepSearch>();
+const MAX_GREP_CACHE_ENTRIES = 64;
+
+/** 清空 Grep 搜索内存缓存（用于测试或会话重置）。 */
+export function clearGrepSearchCache(): void {
+  grepSearchCache.clear();
+}
+
 // --- Interfaces ---
 
 /**
@@ -442,6 +458,20 @@ class GrepToolInvocation extends BaseToolInvocation<
     const { pattern, path: absolutePath, glob } = options;
     let strategyUsed = 'none';
 
+    // 检查是否有未发生写入的幂等缓存结果
+    const cacheDisabled = this.config.getFileReadCacheDisabled?.();
+    const fileCache = this.config.getFileReadCache?.();
+    const currentWriteGen = fileCache?.getWriteGeneration?.() ?? -1;
+    const cacheKey = `${absolutePath}\0${pattern}\0${glob ?? ''}`;
+
+    if (!cacheDisabled && fileCache && grepSearchCache.has(cacheKey)) {
+      const cached = grepSearchCache.get(cacheKey)!;
+      if (cached.writeGeneration === currentWriteGen) {
+        debugLogger.debug('grep-cache-hit', { key: cacheKey });
+        return cached.matches.map((m) => ({ ...m }));
+      }
+    }
+
     try {
       // --- Strategy 1: git grep ---
       const isGit = isGitRepository(absolutePath);
@@ -662,6 +692,19 @@ class GrepToolInvocation extends BaseToolInvocation<
             );
           }
         }
+      }
+
+      if (!cacheDisabled && fileCache) {
+        if (grepSearchCache.size >= MAX_GREP_CACHE_ENTRIES) {
+          const oldestKey = grepSearchCache.keys().next().value;
+          if (oldestKey !== undefined) {
+            grepSearchCache.delete(oldestKey);
+          }
+        }
+        grepSearchCache.set(cacheKey, {
+          writeGeneration: currentWriteGen,
+          matches: allMatches.map((m) => ({ ...m })),
+        });
       }
 
       return allMatches;

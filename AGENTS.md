@@ -180,7 +180,7 @@ npm run preflight  # Full check: clean → install → format → lint → build
   vitest framework
 - **File naming**: `PascalCase.tsx` for React components, `kebab-case.ts` for
   `.ts` files in `packages/core` and `packages/cli` (enforced by ESLint). Existing camelCase files are allowlisted in `eslint.legacy-filenames.mjs`; rename opportunistically when touching them, updating all imports in the same commit (note: renames lose `git blame` history).
-- **Comments**: Default to none. Add only when _why_ is non-obvious; don't delete existing ones as cleanup.
+- **Comments & Docstrings**: All newly written or substantially revised source-code comments and docstrings (inline, block, JSDoc/TSDoc, algorithm and constraint explanations) must be written in Simplified Chinese (`zh-CN`). Add only when _why_ is non-obvious; don't delete existing ones as cleanup. All code identifiers, types, functions, variables, filenames, error messages, and tests remain in English.
 - **Commits**: Conventional Commits (e.g., `feat(cli): Add --json flag`)
 - **Node.js**: Development and production both require `>=22` (Ink 7 + React 19.2 requirement)
 

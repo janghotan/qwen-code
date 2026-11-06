@@ -1962,6 +1962,32 @@ describe('ReadFileTool', () => {
         expect(ranged.llmContent).toContain('b');
       });
 
+      // 测试对未更改文件的重复相同范围读取进行去重短路
+      it('short-circuits consecutive identical ranged Reads on an unchanged file', async () => {
+        const filePath = await put(
+          'multi-repeat.txt',
+          'line1\nline2\nline3\nline4\n',
+        );
+        // 第一次读取指定范围
+        const first = await read({ file_path: filePath, offset: 1, limit: 2 });
+        expect(first.llmContent).toContain('line2');
+        expect(first.llmContent).not.toMatch(/unchanged since/);
+
+        // 连续第二次请求完全相同的范围，命中范围缓存快路径
+        const second = await read({ file_path: filePath, offset: 1, limit: 2 });
+        expect(second.llmContent).toMatch(
+          /unchanged since last read in this session/,
+        );
+        expect(second.returnDisplay).toContain(
+          'Unchanged: multi-repeat.txt (offset 1, limit 2)',
+        );
+
+        // 若请求不同的范围，则正常读取新内容
+        const third = await read({ file_path: filePath, offset: 2, limit: 2 });
+        expect(third.llmContent).toContain('line3');
+        expect(third.llmContent).not.toMatch(/unchanged since/);
+      });
+
       it('does not arm the placeholder if the first Read was truncated', async () => {
         // A truncated read has not shown the full file even without
         // offset/limit, so a no-args re-Read must re-emit the window rather

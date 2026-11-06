@@ -944,3 +944,74 @@ it('does not emit persisted events for skips and correlates an actual saved file
     expect.objectContaining({ prompt_id: 'p', bytes_written: 60000 }),
   );
 });
+
+// 测试诊断感知截断逻辑：在工具输出被截断时提取并保留关键错误诊断行
+describe('diagnostic-aware truncation', () => {
+  it('preserves test failure diagnostics from the omitted middle section', async () => {
+    // 构造长达 1500 行的输出，中间包含 Vitest 测试失败和断言错误
+    const lines: string[] = [];
+    for (let i = 1; i <= 500; i++) {
+      lines.push(`PASS test/suite-${i}.test.ts`);
+    }
+    lines.push('FAIL test/auth.test.ts > login verification failed');
+    lines.push('AssertionError: expected 401 to be 200');
+    lines.push('  Expected: 200');
+    lines.push('  Received: 401');
+    lines.push('  at /workspace/src/auth.ts:42:15');
+    for (let i = 506; i <= 1500; i++) {
+      lines.push(`PASS test/suite-${i}.test.ts`);
+    }
+    const content = lines.join('\n');
+
+    const result = await truncateAndSaveToFile(
+      content,
+      'test-run',
+      '/tmp',
+      40_000,
+      1000,
+      'both',
+    );
+
+    expect(result.outputFile).toBeDefined();
+    expect(result.content).toContain('... [CONTENT TRUNCATED] ...');
+    // 验证关键诊断摘录被成功提取并包含在截断输出中
+    expect(result.content).toContain(
+      '[Key Diagnostic Excerpts from Truncated Output]:',
+    );
+    expect(result.content).toContain(
+      'FAIL test/auth.test.ts > login verification failed',
+    );
+    expect(result.content).toContain('AssertionError: expected 401 to be 200');
+    expect(result.content).toContain('Expected: 200');
+    expect(result.content).toContain('Received: 401');
+  });
+
+  it('preserves compiler TypeScript diagnostics from the omitted middle section', async () => {
+    const lines: string[] = [];
+    for (let i = 1; i <= 300; i++) {
+      lines.push(`Compiling package ${i}...`);
+    }
+    lines.push(
+      'src/services/auth.ts(12,5): error TS2322: Type "string" is not assignable to type "number".',
+    );
+    for (let i = 302; i <= 1000; i++) {
+      lines.push(`Compiling package ${i}...`);
+    }
+    const content = lines.join('\n');
+
+    const result = await truncateAndSaveToFile(
+      content,
+      'tsc-build',
+      '/tmp',
+      20_000,
+      500,
+      'both',
+    );
+
+    expect(result.outputFile).toBeDefined();
+    expect(result.content).toContain(
+      '[Key Diagnostic Excerpts from Truncated Output]:',
+    );
+    expect(result.content).toContain('error TS2322');
+  });
+});

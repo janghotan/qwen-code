@@ -1951,6 +1951,21 @@ describe('getCompressionPrompt', () => {
       /resume.*directly|continue the conversation from where it left off/i,
     );
   });
+
+  // 测试工程化上下文压缩中对关键架构和排错信息的保留指令
+  it('instructs preservation of engineering state, root causes, and diff anchors', () => {
+    const prompt = getCompressionPrompt();
+    // 验证指令中包含了架构不变式要求
+    expect(prompt).toContain('architectural invariants');
+    // 验证指令中包含了修改文件的diff摘要和符号锚点要求
+    expect(prompt).toContain('active diff summaries');
+    // 验证指令中包含了区分真实根因与现象的要求
+    expect(prompt).toContain('root cause vs symptoms');
+    // 验证指令中包含了记录被证伪假设的要求，防止重复试错
+    expect(prompt).toContain('failed hypotheses');
+    // 验证指令中包含了必须运行的验证检查
+    expect(prompt).toContain('required verification');
+  });
 });
 
 describe('resolveInteractionMode', () => {

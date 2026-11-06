@@ -35,16 +35,70 @@ describe('<Header />', () => {
     }
   });
 
-  it('renders the ASCII logo on wide terminal', () => {
+  it('renders the bundled blue icon and engineering title on wide terminal', () => {
     const { lastFrame } = render(<Header {...defaultProps} />);
-    expect(lastFrame()).toContain('██╔═══██╗');
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('NNNNNNNNN');
+    expect(frame).toContain('Engineering Edition');
+    expect(frame).not.toContain('██╔═══██╗');
+    expect(frame).not.toContain('>_ Qwen Code');
+  });
+
+  describe('responsive terminal widths', () => {
+    it('renders the standard 45w alphanumeric ASCII logo at 120 columns', () => {
+      useTerminalSizeMock.mockReturnValue({ columns: 120, rows: 24 });
+      const { lastFrame } = render(<Header {...defaultProps} />);
+      const frame = lastFrame() ?? '';
+      expect(frame).toContain('NNNNNNNNN');
+      expect(frame).toContain('Engineering Edition');
+    });
+
+    it('renders the standard 45w alphanumeric ASCII logo at 100 columns', () => {
+      useTerminalSizeMock.mockReturnValue({ columns: 100, rows: 24 });
+      const { lastFrame } = render(<Header {...defaultProps} />);
+      const frame = lastFrame() ?? '';
+      expect(frame).toContain('NNNNNNNNN');
+      expect(frame).toContain('Engineering Edition');
+    });
+
+    it('renders the compact alphanumeric ASCII logo at 80 columns', () => {
+      useTerminalSizeMock.mockReturnValue({ columns: 80, rows: 24 });
+      const { lastFrame } = render(<Header {...defaultProps} />);
+      const frame = lastFrame() ?? '';
+      expect(frame).toContain('NNNNNN');
+      expect(frame).toContain('Engineering Edition');
+    });
+
+    it('renders the compact alphanumeric ASCII logo at 70 columns', () => {
+      useTerminalSizeMock.mockReturnValue({ columns: 70, rows: 24 });
+      const { lastFrame } = render(<Header {...defaultProps} />);
+      const frame = lastFrame() ?? '';
+      expect(frame).toContain('NNNNNN');
+      expect(frame).toContain('Engineering Edition');
+    });
+
+    it('falls back to minimal wordmark (logo hidden, title preserved) at 60 columns', () => {
+      useTerminalSizeMock.mockReturnValue({ columns: 60, rows: 24 });
+      const { lastFrame } = render(<Header {...defaultProps} />);
+      const frame = lastFrame() ?? '';
+      expect(frame).not.toContain('NNNNNNNNN');
+      expect(frame).toContain('Engineering Edition');
+    });
+
+    it('handles narrow terminals gracefully (50 columns) with wordmark fallback', () => {
+      useTerminalSizeMock.mockReturnValue({ columns: 50, rows: 24 });
+      const { lastFrame } = render(<Header {...defaultProps} />);
+      const frame = lastFrame() ?? '';
+      expect(frame).toContain('Engineering Edition');
+    });
   });
 
   it('hides the ASCII logo on narrow terminal', () => {
     useTerminalSizeMock.mockReturnValue({ columns: 60, rows: 24 });
     const { lastFrame } = render(<Header {...defaultProps} />);
     expect(lastFrame()).not.toContain('██╔═══██╗');
-    expect(lastFrame()).toContain('>_ Qwen Code');
+    expect(lastFrame()).toContain('Engineering Edition');
+    expect(lastFrame()).not.toContain('>_ Qwen Code');
   });
 
   it('displays the version number', () => {
@@ -142,12 +196,13 @@ describe('<Header />', () => {
     expect(lastFrame()).toContain('┐');
   });
 
-  it('renders plain text when NO_COLOR disables gradient colors', () => {
+  it('renders the bundled icon in plain mode when NO_COLOR is set', () => {
     process.env['NO_COLOR'] = '1';
 
     const { lastFrame } = render(<Header {...defaultProps} />);
 
-    expect(lastFrame()).toContain('██╔═══██╗');
+    expect(lastFrame()).toContain('Engineering Edition');
+    expect(lastFrame()).toContain('NNNNNNNNN');
   });
 
   it('renders the custom subtitle in place of the blank spacer row', () => {
@@ -160,7 +215,7 @@ describe('<Header />', () => {
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Built-in DataWorks Official Skills');
     // Subtitle sits between the title and the auth line.
-    const titleIdx = frame.indexOf('>_ Qwen Code');
+    const titleIdx = frame.indexOf('Engineering Edition');
     const subtitleIdx = frame.indexOf('Built-in DataWorks Official Skills');
     const authIdx = frame.indexOf('Qwen OAuth');
     expect(titleIdx).toBeLessThan(subtitleIdx);
@@ -181,7 +236,9 @@ describe('<Header />', () => {
         />,
       );
       const lines = (ui.lastFrame() ?? '').split('\n');
-      const title = lines.findIndex((line) => line.includes('>_ Qwen Code'));
+      const title = lines.findIndex((line) =>
+        line.includes('Engineering Edition'),
+      );
       const plan = lines.findIndex((line) =>
         line.includes('Qwen Pro | [Qwen Subscription]'),
       );
@@ -198,7 +255,7 @@ describe('<Header />', () => {
     // Title and auth still both render at their usual positions; the
     // spacer between them is just whitespace-padding, so we assert the
     // visible chrome the user sees.
-    expect(frame).toContain('>_ Qwen Code');
+    expect(frame).toContain('Engineering Edition');
     expect(frame).toContain('Qwen OAuth');
   });
 
@@ -252,13 +309,14 @@ describe('<Header />', () => {
     expect(lastFrame()).toContain('Qwen OAuth');
   });
 
-  it('falls back to the default Qwen logo when no custom art was provided at all', () => {
+  it('keeps the bundled icon when no custom art was provided', () => {
     useTerminalSizeMock.mockReturnValue({ columns: 60, rows: 24 });
     const { lastFrame } = render(<Header {...defaultProps} />);
     // With no customAsciiArt, narrow widths still hide the QWEN logo, but a
     // wide enough terminal would show it — the previous test already covers
     // the wide case. This one just confirms the no-custom-art path doesn't
     // incidentally hide the logo.
-    expect(lastFrame()).toContain('>_ Qwen Code');
+    expect(lastFrame()).toContain('Engineering Edition');
+    expect(lastFrame()).not.toContain('>_ Qwen Code');
   });
 });

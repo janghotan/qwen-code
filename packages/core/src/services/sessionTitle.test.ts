@@ -24,8 +24,11 @@ import {
   tryGenerateSessionTitle,
 } from './sessionTitle.js';
 import { content, modelText, userText } from '../test-utils/model-fixtures.js';
+import { uiTelemetryService } from '../telemetry/uiTelemetry.js';
+import { EVENT_API_RESPONSE } from '../telemetry/constants.js';
 
 interface MockOptions {
+  sessionId?: string | undefined;
   fastModel?: string | undefined;
   history?: Content[];
   chat?: LlmChat;
@@ -45,6 +48,7 @@ function makeConfig(opts: MockOptions): {
   });
 
   const config = {
+    getSessionId: vi.fn(() => opts.sessionId),
     getFastModel: vi.fn(() => opts.fastModel ?? undefined),
     getModel: vi.fn(() => 'qwen-plus'),
     getLlmClient: vi.fn(() => ({
@@ -245,6 +249,56 @@ describe('tryGenerateSessionTitle', () => {
       new AbortController().signal,
     );
     expect(outcome).toEqual({ ok: false, reason: 'empty_history' });
+  });
+
+  it('skips session title generation and returns quota_exceeded when provider quota is reached', async () => {
+    let called = false;
+    const { config } = makeConfig({
+      sessionId: 'quota-test-sess',
+      fastModel: 'qwen-turbo',
+      history: [
+        { role: 'user', parts: [{ text: 'Hello' }] },
+        { role: 'model', parts: [{ text: 'Hi' }] },
+      ],
+      generateJsonResult: async () => {
+        called = true;
+        return { title: 'Some Title' };
+      },
+    });
+
+    const origEnv = process.env['QWEN_CODE_MAX_PROVIDER_TOKENS_PER_SESSION'];
+    process.env['QWEN_CODE_MAX_PROVIDER_TOKENS_PER_SESSION'] = '100';
+    try {
+      uiTelemetryService.addEvent(
+        {
+          'event.name': EVENT_API_RESPONSE,
+          'event.timestamp': new Date().toISOString(),
+          response_id: 'r1',
+          model: 'm',
+          duration_ms: 1,
+          input_token_count: 100,
+          output_token_count: 0,
+          cached_content_token_count: 0,
+          thoughts_token_count: 0,
+          total_token_count: 100,
+          prompt_id: 'p',
+        } as Parameters<typeof uiTelemetryService.addEvent>[0],
+        'quota-test-sess',
+      );
+      const outcome = await tryGenerateSessionTitle(
+        config,
+        new AbortController().signal,
+      );
+      expect(outcome).toEqual({ ok: false, reason: 'quota_exceeded' });
+      expect(called).toBe(false);
+    } finally {
+      if (origEnv === undefined) {
+        delete process.env['QWEN_CODE_MAX_PROVIDER_TOKENS_PER_SESSION'];
+      } else {
+        process.env['QWEN_CODE_MAX_PROVIDER_TOKENS_PER_SESSION'] = origEnv;
+      }
+      uiTelemetryService.reset();
+    }
   });
 
   it('returns {ok:false, reason:"model_error"} when the LLM throws', async () => {

@@ -138,6 +138,20 @@ export interface FileReadEntry {
    * issue #4239 false-block this whole marker exists to avoid.
    */
   readResidentInHistory: boolean;
+  /**
+   * 最近一次读取请求的范围（如 offset / limit / pages）。
+   * 用于检测连续的相同范围读取，避免重复向模型上下文发送冗余代码块。
+   */
+  lastReadRange?: FileRange;
+}
+
+/**
+ * 文件读取范围描述（行偏移量、限制行数或PDF页面范围）。
+ */
+export interface FileRange {
+  offset?: number;
+  limit?: number;
+  pages?: string;
 }
 
 /** Result of {@link FileReadCache.check}. */
@@ -150,6 +164,7 @@ export type FileReadCheckResult =
 export class FileReadCache {
   private readonly byInode = new Map<string, FileReadEntry>();
   private clearGeneration = 0;
+  private writeGeneration = 0;
   private static readonly MAX_ENTRIES = 4096;
 
   /** Build the canonical key for a file from its Stats. */
@@ -209,7 +224,7 @@ export class FileReadCache {
   recordRead(
     absPath: string,
     stats: Stats,
-    opts: { full: boolean; cacheable: boolean },
+    opts: { full: boolean; cacheable: boolean; range?: FileRange },
   ): FileReadEntry {
     if (!FileReadCache.hasVerifiableIdentity(stats)) {
       const entry = FileReadCache.createEntry(absPath, stats);
@@ -217,6 +232,7 @@ export class FileReadCache {
       entry.readResidentInHistory = opts.full;
       entry.lastReadWasFull = opts.full;
       entry.lastReadCacheable = opts.cacheable;
+      entry.lastReadRange = opts.range;
       return entry;
     }
 
@@ -228,12 +244,9 @@ export class FileReadCache {
       existing.sizeBytes === stats.size;
     const entry = this.upsert(absPath, stats);
     entry.lastReadAt = Date.now();
+    entry.lastReadRange = opts.range;
     if (opts.full) {
-      // Only a full read re-arms: a partial read leaves a mere slice
-      // in history while sticky `lastReadWasFull` stays true, so
-      // re-arming on it would resurrect a dangling placeholder for an
-      // evicted full read. Leaving it untouched for partial reads is
-      // correct either way (a still-resident full read stays true).
+      // 仅全量读取才能重新激活整文件驻留标记；范围读取仅保留各自的切片范围
       entry.readResidentInHistory = true;
     }
     if (sameFingerprint) {
@@ -281,6 +294,7 @@ export class FileReadCache {
     stats: Stats,
     opts: { cacheable?: boolean } = {},
   ): FileReadEntry {
+    this.writeGeneration++;
     const entry = FileReadCache.hasVerifiableIdentity(stats)
       ? this.upsert(absPath, stats)
       : FileReadCache.createEntry(absPath, stats);
@@ -353,6 +367,7 @@ export class FileReadCache {
     const entry = this.byInode.get(FileReadCache.inodeKey(stats));
     if (entry) {
       entry.readResidentInHistory = false;
+      entry.lastReadRange = undefined;
       return true;
     }
     return false;
@@ -362,6 +377,7 @@ export class FileReadCache {
   markAllReadsEvictedFromHistory(): void {
     for (const entry of this.byInode.values()) {
       entry.readResidentInHistory = false;
+      entry.lastReadRange = undefined;
     }
   }
 
@@ -371,6 +387,7 @@ export class FileReadCache {
       return;
     }
 
+    this.writeGeneration++;
     this.byInode.delete(FileReadCache.inodeKey(stats));
   }
 
@@ -394,12 +411,16 @@ export class FileReadCache {
         removed = true;
       }
     }
+    if (removed) {
+      this.writeGeneration++;
+    }
     return removed;
   }
 
   /** Drop every entry. Used by tests and on Config shutdown. */
   clear(): void {
     this.clearGeneration++;
+    this.writeGeneration++;
     this.dropEntries();
   }
 
@@ -410,6 +431,14 @@ export class FileReadCache {
 
   getClearGeneration(): number {
     return this.clearGeneration;
+  }
+
+  /**
+   * 获取写操作代数。每次文件写入、失效或全量清理时递增。
+   * 用于搜索工具（如 GrepTool、GlobTool）感知工作区文件是否发生变更，从而安全地复用搜索缓存。
+   */
+  getWriteGeneration(): number {
+    return this.writeGeneration;
   }
 
   /**

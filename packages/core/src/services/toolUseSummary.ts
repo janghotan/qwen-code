@@ -20,6 +20,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Config } from '../config/config.js';
 import { runSideQuery } from '../utils/sideQuery.js';
+import { checkProviderQuota } from '../telemetry/provider-quota.js';
 import { createDebugLogger } from '../utils/debugLogger.js';
 
 const debugLogger = createDebugLogger('TOOL_USE_SUMMARY');
@@ -132,6 +133,14 @@ export async function generateToolUseSummary(
 
     if (!config.getLlmClient()) {
       debugLogger.debug('No gemini client available — skipping');
+      return null;
+    }
+
+    const quotaError = checkProviderQuota(config.getSessionId?.());
+    if (quotaError) {
+      debugLogger.debug(
+        'Provider quota reached — skipping optional tool use summary',
+      );
       return null;
     }
 

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+REPO_ROOT="$(dirname "$(dirname "$SCRIPT_PATH")")"
+exec node "$REPO_ROOT/dist/cli.js" "$@"

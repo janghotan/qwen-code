@@ -17,6 +17,7 @@ import type { Config } from '../config/config.js';
 import { createMockWorkspaceContext } from '../test-utils/mockWorkspaceContext.js';
 import { tildeifyPath } from '../utils/paths.js';
 import { ToolErrorType } from './tool-error.js';
+import { FileReadCache } from '../services/fileReadCache.js';
 import * as glob from 'glob';
 import type { Path as GlobResultPath } from 'glob';
 
@@ -25,6 +26,7 @@ vi.mock('glob', { spy: true });
 describe('GlobTool', () => {
   let tempRootDir: string; // This will be the rootDirectory for the GlobTool instance
   let globTool: GlobTool;
+  let fileReadCache: FileReadCache;
   const abortSignal = new AbortController().signal;
 
   // Mock config for testing
@@ -41,6 +43,8 @@ describe('GlobTool', () => {
       getGlobExcludes: () => [],
     }),
     getTruncateToolOutputLines: () => 1000,
+    getFileReadCache: () => fileReadCache,
+    getFileReadCacheDisabled: () => false,
   } as unknown as Config;
 
   /** A GlobTool over `mockConfig` with some getters overridden. */
@@ -77,6 +81,7 @@ describe('GlobTool', () => {
   beforeEach(async () => {
     // Create a unique root directory for each test run
     tempRootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'glob-tool-root-'));
+    fileReadCache = new FileReadCache();
     await put('.git', ''); // Fake git repo
     globTool = new GlobTool(mockConfig);
 
@@ -154,6 +159,30 @@ describe('GlobTool', () => {
 
     it('should find files case-insensitively by default (pattern: *.TXT)', async () => {
       expectFound(await run({ pattern: '*.TXT' }), 2, 'fileA.txt', 'FileB.TXT');
+    });
+
+    // 测试 Glob 目录搜索结果缓存与基于写代数的失效行为
+    it('reuses cached glob search results when no file mutations have occurred', async () => {
+      const first = await run({ pattern: '*.txt' });
+      expect(first.llmContent).toContain('fileA.txt');
+
+      // 连续第二次搜索命中目录缓存
+      const second = await run({ pattern: '*.txt' });
+      expect(second.llmContent).toBe(first.llmContent);
+      expect(second.returnDisplay).toBe(first.returnDisplay);
+
+      // 当发生文件写入操作后，写代数递增，缓存失效
+      const fileCache = mockConfig.getFileReadCache();
+      const dummyStats = {
+        dev: 1,
+        ino: 8888,
+        mtimeMs: 1234,
+        size: 10,
+      } as unknown as import('node:fs').Stats;
+      fileCache.recordWrite('/tmp/glob-new.txt', dummyStats);
+
+      const third = await run({ pattern: '*.txt' });
+      expect(third.llmContent).toContain('fileA.txt');
     });
 
     it('should find files using a pattern that includes a subdirectory', async () => {

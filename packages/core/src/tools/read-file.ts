@@ -57,6 +57,7 @@ import {
   normalizeParts,
   splitImageParts,
 } from '../services/visionBridge/image-part-utils.js';
+import type { FileRange } from '../services/fileReadCache.js';
 
 const debugLogger = createDebugLogger('READ_FILE_CACHE');
 
@@ -240,26 +241,50 @@ class ReadFileToolInvocation extends BaseToolInvocation<
     }
     signal.throwIfAborted();
 
+    const requestedRange: FileRange = {
+      offset: this.params.offset ?? undefined,
+      limit: this.params.limit ?? undefined,
+      pages: this.params.pages ?? undefined,
+    };
+    const isSameRange = (a?: FileRange, b?: FileRange): boolean => {
+      if (!a || !b) return false;
+      return (
+        a.offset === b.offset && a.limit === b.limit && a.pages === b.pages
+      );
+    };
+
     if (
       useFastPath &&
       stats &&
-      isFullRead &&
       cache.getClearGeneration() === cacheGeneration
     ) {
       const status = cache.check(stats);
       if (
         status.state === 'fresh' &&
         status.entry.lastReadAt !== undefined &&
-        status.entry.lastReadWasFull &&
         status.entry.lastReadCacheable &&
-        // Only quote-back if that read is still in history (issue
-        // #4239: idle microcompaction flips this off when it blanks it).
-        status.entry.readResidentInHistory &&
         (status.entry.lastWriteAt === undefined ||
           status.entry.lastReadAt > status.entry.lastWriteAt)
       ) {
-        debugLogger.debug('hit', { path: absPath });
-        return this.unchangedResult(absPath);
+        if (
+          isFullRead &&
+          status.entry.lastReadWasFull &&
+          status.entry.readResidentInHistory
+        ) {
+          debugLogger.debug('hit', { path: absPath });
+          return this.unchangedResult(absPath);
+        } else if (
+          !isFullRead &&
+          status.entry.lastReadRange &&
+          isSameRange(status.entry.lastReadRange, requestedRange)
+        ) {
+          // 连续相同范围读取命中快路径，避免向上下文发送重复代码片段
+          debugLogger.debug('hit-range', {
+            path: absPath,
+            range: requestedRange,
+          });
+          return this.unchangedRangeResult(absPath, requestedRange);
+        }
       }
       debugLogger.debug('miss', { path: absPath, state: status.state });
     }
@@ -352,6 +377,7 @@ class ReadFileToolInvocation extends BaseToolInvocation<
       cache.recordRead(absPath, recordStats, {
         full: isFullRead && !result.isTruncated,
         cacheable,
+        range: requestedRange,
       });
       this.recordedStats = recordStats;
       // Reading into a program does not prove the full text reached history.
@@ -627,6 +653,26 @@ class ReadFileToolInvocation extends BaseToolInvocation<
     return {
       llmContent,
       returnDisplay: `Unchanged: ${relativePath}`,
+    };
+  }
+
+  /**
+   * 当文件在相同范围（offset/limit/pages）已被读取且内容仍驻留在会话历史中、未发生写入时，
+   * 返回精简提示，避免将重复的代码行再次发送到模型上下文。
+   */
+  private unchangedRangeResult(absPath: string, range: FileRange): ToolResult {
+    const relativePath = shortenPath(
+      makeRelative(absPath, this.config.getTargetDir()),
+    );
+    const rangeDesc = range.pages
+      ? `pages ${range.pages}`
+      : `offset ${range.offset ?? 1}${range.limit !== undefined ? `, limit ${range.limit}` : ''}`;
+    const llmContent =
+      `[File ${relativePath} (${rangeDesc}) unchanged since last read in this session — ` +
+      `the requested range was already provided earlier in this conversation.]`;
+    return {
+      llmContent,
+      returnDisplay: `Unchanged: ${relativePath} (${rangeDesc})`,
     };
   }
 }

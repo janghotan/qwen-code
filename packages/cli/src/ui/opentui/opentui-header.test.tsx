@@ -102,7 +102,7 @@ function fakeSettings(ui: Record<string, unknown> = {}): LoadedSettings {
     isTrusted: true,
     system: { settings: {} },
     workspace: { settings: {} },
-    user: { settings: {} },
+    user: { settings: { ui } },
     systemDefaults: { settings: {} },
   } as unknown as LoadedSettings;
 }
@@ -113,9 +113,17 @@ describe('OpenTuiBanner', () => {
       <OpenTuiBanner config={fakeConfig()} settings={fakeSettings()} />,
     );
     const text = container.textContent ?? '';
-    expect(text).toContain('>_ Qwen Code');
+    expect(text).toContain('Engineering Edition');
+    expect(text).not.toContain('>_ Qwen Code');
     expect(text).toContain('qwen3-coder-plus');
     expect(text).toContain('qwen-code');
+  });
+
+  it('renders the bundled icon in the supplied solid blue', () => {
+    const { container } = render(
+      <OpenTuiBanner config={fakeConfig()} settings={fakeSettings()} />,
+    );
+    expect(container.querySelector('[data-fg="#072efe"]')).not.toBeNull();
   });
 
   it('refreshes live subscription identity and model, and hides the plan after logout', () => {
@@ -154,6 +162,60 @@ describe('OpenTuiBanner', () => {
     expect(ui.container.textContent).not.toContain('Qwen Plus');
     expect(ui.container.textContent).not.toContain('[Qwen Subscription]');
     ui.unmount();
+  });
+
+  it('renders the supplied logo in its solid blue color', () => {
+    const { container } = render(
+      <OpenTuiBanner config={fakeConfig()} settings={fakeSettings()} />,
+    );
+    const rows = logoRows(container);
+    expect(rows.length).toBeGreaterThan(1);
+    expect(rows.flat().every((color) => color === '#072efe')).toBe(true);
+  });
+
+  describe('responsive widths parity with ink', () => {
+    afterEach(() => {
+      mocks.state.dimensions = { width: 110, height: 40 };
+    });
+
+    it('renders the standard alphanumeric logo at 120 columns', () => {
+      mocks.state.dimensions = { width: 120, height: 40 };
+      const { container } = render(
+        <OpenTuiBanner config={fakeConfig()} settings={fakeSettings()} />,
+      );
+      const rows = logoRows(container);
+      expect(rows).toHaveLength(24);
+      expect(container.textContent).toContain('Engineering Edition');
+    });
+
+    it('renders the compact alphanumeric logo at 80 columns', () => {
+      mocks.state.dimensions = { width: 80, height: 40 };
+      const { container } = render(
+        <OpenTuiBanner config={fakeConfig()} settings={fakeSettings()} />,
+      );
+      const rows = logoRows(container);
+      expect(rows).toHaveLength(10);
+      expect(container.textContent).toContain('Engineering Edition');
+    });
+
+    it('renders the compact alphanumeric logo at 70 columns', () => {
+      mocks.state.dimensions = { width: 70, height: 40 };
+      const { container } = render(
+        <OpenTuiBanner config={fakeConfig()} settings={fakeSettings()} />,
+      );
+      const rows = logoRows(container);
+      expect(rows).toHaveLength(10);
+      expect(container.textContent).toContain('Engineering Edition');
+    });
+
+    it('falls back to minimal wordmark at 60 columns without logo', () => {
+      mocks.state.dimensions = { width: 60, height: 40 };
+      const { container } = render(
+        <OpenTuiBanner config={fakeConfig()} settings={fakeSettings()} />,
+      );
+      expect(container.querySelector('[data-fg="#072efe"]')).toBeNull();
+      expect(container.textContent).toContain('Engineering Edition');
+    });
   });
 
   it('shows the subscription provider without inventing an unknown plan', () => {
@@ -200,7 +262,7 @@ describe('OpenTuiBanner', () => {
       const rows = [
         ...ui.container.querySelector('[data-bordercolor]')!.children,
       ].map((element) => element.textContent);
-      expect(rows[0]).toContain('>_ Qwen Code');
+      expect(rows[0]).toContain('Engineering Edition');
       expect(rows[customBannerSubtitle ? 2 : 1]).toContain(
         'Qwen Pro | [Qwen Subscription]',
       );
@@ -315,9 +377,14 @@ describe('OpenTuiBanner', () => {
  * columns wide and `ink-gradient` samples a fresh ramp per laid-out line.
  */
 describe('wordmark gradient', () => {
+  const art = [36, 37, 37, 37, 37, 37]
+    .map((width) => 'A'.repeat(width))
+    .join('\n');
+  const settings = () => fakeSettings({ customAsciiArt: art });
+
   it('samples each line on its own ramp, as ink’s per-line Transform does', () => {
     const { container } = render(
-      <OpenTuiBanner config={fakeConfig()} settings={fakeSettings()} />,
+      <OpenTuiBanner config={fakeConfig()} settings={settings()} />,
     );
     const rows = logoRows(container);
     expect(rows.map((row) => row.length)).toEqual([36, 37, 37, 37, 37, 37]);
@@ -344,7 +411,7 @@ describe('wordmark gradient', () => {
 
   it('reaches the last stop on every line, including the shorter first one', () => {
     const { container } = render(
-      <OpenTuiBanner config={fakeConfig()} settings={fakeSettings()} />,
+      <OpenTuiBanner config={fakeConfig()} settings={settings()} />,
     );
     for (const row of logoRows(container)) {
       expect(row.at(-1)).toBe('#c3677f');
@@ -355,7 +422,7 @@ describe('wordmark gradient', () => {
     applyOpenTuiTheme(getOpenTuiTheme('Dracula')!);
     try {
       const { container } = render(
-        <OpenTuiBanner config={fakeConfig()} settings={fakeSettings()} />,
+        <OpenTuiBanner config={fakeConfig()} settings={settings()} />,
       );
       for (const row of logoRows(container)) {
         expect(row[0]).toBe('#ff79c6');
@@ -370,15 +437,15 @@ describe('wordmark gradient', () => {
     // `/theme` mutates this LoadedSettings in place and leaves the Config
     // alone, so no other memo dep changes identity under a live banner.
     const config = fakeConfig();
-    const settings = fakeSettings();
+    const testSettings = settings();
     const { container, rerender } = render(
-      <OpenTuiBanner config={config} settings={settings} />,
+      <OpenTuiBanner config={config} settings={testSettings} />,
     );
     expect(logoRows(container)[0]![0]).toBe('#4796e4');
 
     applyOpenTuiTheme(getOpenTuiTheme('Dracula')!);
     try {
-      rerender(<OpenTuiBanner config={config} settings={settings} />);
+      rerender(<OpenTuiBanner config={config} settings={testSettings} />);
       expect(logoRows(container)[0]![0]).toBe('#ff79c6');
     } finally {
       applyThemeMode('dark');
@@ -391,7 +458,7 @@ describe('wordmark gradient', () => {
     applyOpenTuiTheme(getActiveOpenTuiTheme());
     try {
       const { container } = render(
-        <OpenTuiBanner config={fakeConfig()} settings={fakeSettings()} />,
+        <OpenTuiBanner config={fakeConfig()} settings={settings()} />,
       );
       const rows = logoRows(container);
       expect(rows).toHaveLength(6);

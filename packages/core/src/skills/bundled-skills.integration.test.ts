@@ -14,6 +14,10 @@ import {
   type AvailableSkillEntry,
 } from '../tools/skill-utils.js';
 import { parseSkillContent } from './skill-load.js';
+import {
+  SkillActivationRegistry,
+  splitConditionalSkills,
+} from './skill-activation.js';
 import { SkillManager } from './skill-manager.js';
 import { makeFakeConfig } from '../test-utils/config.js';
 
@@ -66,6 +70,54 @@ describe('bundled SKILL.md files', () => {
     }
   });
 
+  it('ships compact path-activated engineering skills', async () => {
+    const expectedNames = [
+      'engineering-implementation',
+      'software-architecture',
+      'root-cause-debugging',
+      'test-engineering',
+      'security-code-review',
+      'performance-engineering',
+    ];
+    const manager = new SkillManager(makeFakeConfig());
+    const configs = await Promise.all(
+      expectedNames.map(async (name) => {
+        const file = path.join(bundledDir, name, 'SKILL.md');
+        expect(fs.existsSync(file), `${name} should be bundled`).toBe(true);
+        const cfg = parseSkillContent(fs.readFileSync(file, 'utf8'), file);
+        expect(cfg.paths, `${name} should load conditionally`).toBeDefined();
+        expect(cfg.paths?.length).toBeGreaterThan(0);
+        expect(cfg.body.length).toBeLessThanOrEqual(1_200);
+        // The runtime parser (not only the fixture parser above) must accept it.
+        await expect(
+          manager.loadSkill(name, 'bundled'),
+        ).resolves.not.toBeNull();
+        return cfg;
+      }),
+    );
+
+    const split = splitConditionalSkills(configs);
+    expect(split.unconditional).toEqual([]);
+    expect(split.conditional).toHaveLength(expectedNames.length);
+
+    const registry = new SkillActivationRegistry(configs, '/');
+    expect(await registry.matchAndConsume('/src/app.ts')).toContain(
+      'engineering-implementation',
+    );
+    expect(await registry.matchAndConsume('/tests/app.test.ts')).toEqual(
+      expect.arrayContaining(['root-cause-debugging', 'test-engineering']),
+    );
+    expect(await registry.matchAndConsume('/src/auth/session.ts')).toContain(
+      'security-code-review',
+    );
+    expect(await registry.matchAndConsume('/bench/api.bench.ts')).toContain(
+      'performance-engineering',
+    );
+    expect(await registry.matchAndConsume('/docs/architecture.md')).toContain(
+      'software-architecture',
+    );
+  });
+
   // Every model-invocable bundled skill's `description` and `when_to_use` are
   // rendered into the session-start <available_skills> listing and charged on
   // every request. The listing is simplified once it passes
@@ -86,7 +138,10 @@ describe('bundled SKILL.md files', () => {
         const file = path.join(bundledDir, name, 'SKILL.md');
         return parseSkillContent(fs.readFileSync(file, 'utf8'), file);
       })
-      .filter((cfg) => !cfg.disableModelInvocation)
+      // Mirror the runtime listing: pending conditional skills (`paths:`) are
+      // not advertised until a tool call activates them, so they do not take
+      // room in the session-start listing this budget protects.
+      .filter((cfg) => !cfg.disableModelInvocation && !cfg.paths?.length)
       .map((cfg) => ({
         name: cfg.name,
         description: cfg.description,

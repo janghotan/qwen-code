@@ -49,7 +49,11 @@ export type LiveToolItem = Extract<HistoryItem, { kind: 'tool' }> & {
   queued?: boolean;
   /** Structured FileDiff result: the card renders colored diff lines inline
    * (ink DiffResultRenderer parity) instead of the flattened output text. */
-  diff?: { fileDiff: string; fileName: string };
+  diff?: {
+    fileDiff: string;
+    fileName: string;
+    diffStat?: { model_added_lines: number; model_removed_lines: number };
+  };
   /** Structured TodoWrite result: the card renders the status-icon list
    * (ink TodoDisplay parity) instead of the flattened output text. */
   todos?: TodoItem[];

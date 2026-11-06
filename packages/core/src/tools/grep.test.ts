@@ -738,4 +738,30 @@ describe('GrepTool', () => {
       }
     });
   });
+
+  // 测试 Grep 搜索结果缓存与基于写代数的失效行为
+  describe('search result memoization', () => {
+    it('reuses cached search results when no file mutations have occurred', async () => {
+      const first = await run({ pattern: 'world' });
+      expect(first.llmContent).toContain('Found 3 matches');
+
+      // 连续第二次执行相同搜索，命中内存缓存
+      const second = await run({ pattern: 'world' });
+      expect(second.llmContent).toBe(first.llmContent);
+      expect(second.returnDisplay).toBe(first.returnDisplay);
+
+      // 当发生文件写入操作后，写代数递增，缓存失效并重新检索
+      const fileCache = mockConfig.getFileReadCache();
+      const dummyStats = {
+        dev: 1,
+        ino: 9999,
+        mtimeMs: 1234,
+        size: 10,
+      } as unknown as import('node:fs').Stats;
+      fileCache.recordWrite('/tmp/newfile.txt', dummyStats);
+
+      const third = await run({ pattern: 'world' });
+      expect(third.llmContent).toContain('Found 3 matches');
+    });
+  });
 });

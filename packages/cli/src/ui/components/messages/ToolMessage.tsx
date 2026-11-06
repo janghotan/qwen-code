@@ -88,6 +88,7 @@ type DiffResultDisplay = Pick<
   FileDiff,
   | 'fileDiff'
   | 'fileName'
+  | 'diffStat'
   | 'truncatedForSession'
   | 'fileDiffLength'
   | 'fileDiffTruncated'
@@ -174,7 +175,7 @@ type DisplayRendererResult =
   | { type: 'plan'; data: PlanResultDisplay }
   | { type: 'advisor'; data: AdvisorDisplay }
   | { type: 'string'; data: string }
-  | { type: 'diff'; data: { fileDiff: string; fileName: string } }
+  | { type: 'diff'; data: DiffResultDisplay }
   | { type: 'task'; data: AgentResultDisplay }
   | { type: 'image'; data: TerminalImageDisplay }
   | { type: 'ansi'; data: AnsiOutput; stats?: ShellStatsBarProps };
@@ -1000,6 +1001,12 @@ export const ToolMessage: React.FC<ToolMessageProps> = ({
               confirmationDetails.prompt,
             )
           }
+          diffStat={
+            status === ToolCallStatus.Success &&
+            effectiveDisplayRenderer.type === 'diff'
+              ? effectiveDisplayRenderer.data.diffStat
+              : undefined
+          }
         />
         {shouldShowFocusHint && (
           <Box marginLeft={1} flexShrink={0}>
@@ -1339,6 +1346,7 @@ type ToolInfo = {
   status: ToolCallStatus;
   emphasis: TextEmphasis;
   hideDescription?: boolean;
+  diffStat?: FileDiff['diffStat'];
 };
 const ToolInfo: React.FC<ToolInfo> = ({
   name,
@@ -1346,6 +1354,7 @@ const ToolInfo: React.FC<ToolInfo> = ({
   status,
   emphasis,
   hideDescription,
+  diffStat,
 }) => {
   const nameColor = React.useMemo<string>(() => {
     switch (emphasis) {
@@ -1371,6 +1380,17 @@ const ToolInfo: React.FC<ToolInfo> = ({
           <>
             {' '}
             <Text color={theme.text.secondary}>{description}</Text>
+          </>
+        )}
+        {diffStat && (
+          <>
+            {' '}
+            <Text color={theme.status.success}>
+              (+{diffStat.model_added_lines})
+            </Text>
+            <Text color={theme.status.error}>
+              (-{diffStat.model_removed_lines})
+            </Text>
           </>
         )}
       </Text>

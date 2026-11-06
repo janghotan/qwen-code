@@ -94,7 +94,14 @@ type OpenTuiStreamEventData =
       /** Structured FileDiff payload: rendered as colored diff lines in the
        * tool card instead of the flattened `display` text (ink
        * DiffResultRenderer parity). */
-      diff?: { fileDiff: string; fileName: string };
+      diff?: {
+        fileDiff: string;
+        fileName: string;
+        diffStat?: {
+          model_added_lines: number;
+          model_removed_lines: number;
+        };
+      };
       /** Structured TodoWrite payload: rendered as a status-icon list in the
        * tool card (ink TodoDisplay parity) instead of the flattened text. */
       todos?: TodoItem[];
@@ -279,15 +286,36 @@ export function formatToolArgs(
 }
 
 /** Narrows a ToolResultDisplay to its FileDiff shape, if it is one. */
-export function extractFileDiff(
-  display: unknown,
-): { fileDiff: string; fileName: string } | null {
+export function extractFileDiff(display: unknown): {
+  fileDiff: string;
+  fileName: string;
+  diffStat?: { model_added_lines: number; model_removed_lines: number };
+} | null {
   if (typeof display !== 'object' || display === null) return null;
   const o = display as Record<string, unknown>;
   if (typeof o['fileDiff'] !== 'string') return null;
+  const diffStat = o['diffStat'];
+  const added =
+    typeof diffStat === 'object' && diffStat !== null
+      ? (diffStat as Record<string, unknown>)['model_added_lines']
+      : undefined;
+  const removed =
+    typeof diffStat === 'object' && diffStat !== null
+      ? (diffStat as Record<string, unknown>)['model_removed_lines']
+      : undefined;
+  const hasDiffStat =
+    typeof added === 'number' &&
+    Number.isSafeInteger(added) &&
+    added >= 0 &&
+    typeof removed === 'number' &&
+    Number.isSafeInteger(removed) &&
+    removed >= 0;
   return {
     fileDiff: o['fileDiff'],
     fileName: typeof o['fileName'] === 'string' ? o['fileName'] : '',
+    ...(hasDiffStat
+      ? { diffStat: { model_added_lines: added, model_removed_lines: removed } }
+      : {}),
   };
 }
 

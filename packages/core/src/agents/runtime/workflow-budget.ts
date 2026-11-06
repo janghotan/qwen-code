@@ -44,11 +44,18 @@ import { MAX_TURN_BUDGET_TOKENS } from '../../core/turn-budget.js';
 import { uiTelemetryService } from '../../telemetry/uiTelemetry.js';
 import { createDebugLogger } from '../../utils/debugLogger.js';
 import { parsePositiveIntegerEnv } from '../../utils/env.js';
+import { resolveMaxProviderTokensPerSession } from '../../telemetry/provider-quota.js';
 import type { WorkflowBudget } from './workflow-sandbox.js';
 
 const debugLogger = createDebugLogger('WORKFLOW_BUDGET');
 
 export const MAX_TOKENS_PER_WORKFLOW_ENV = 'QWEN_CODE_MAX_TOKENS_PER_WORKFLOW';
+
+export {
+  MAX_PROVIDER_TOKENS_PER_SESSION_ENV,
+  ProviderQuotaExceededError,
+  resolveMaxProviderTokensPerSession,
+} from '../../telemetry/provider-quota.js';
 
 /**
  * Absolute upper bound on a token cap. Even an operator who sets
@@ -114,6 +121,8 @@ export interface WorkflowBudgetOptions {
   turnSpent?: () => number;
   /** The directive text that set a `'directive'` total, for display. */
   directiveText?: string;
+  /** Provider-reported session usage and its optional dispatch cap. */
+  providerQuota?: { limit: number; used: () => number | null };
 }
 
 /**
@@ -131,6 +140,8 @@ export class WorkflowBudgetImpl implements WorkflowBudget {
   readonly directiveText: string | undefined;
   private readonly turnSpent: (() => number) | undefined;
   private _runSpent: number;
+  private readonly providerQuota: WorkflowBudgetOptions['providerQuota'];
+  private providerQuotaWarned = false;
 
   constructor(total: number | null, options: WorkflowBudgetOptions = {}) {
     this.total = total;
@@ -138,6 +149,7 @@ export class WorkflowBudgetImpl implements WorkflowBudget {
     this.directiveText =
       this.source === 'directive' ? options.directiveText : undefined;
     this.turnSpent = options.turnSpent;
+    this.providerQuota = options.providerQuota;
     this._runSpent = 0;
   }
 
@@ -158,6 +170,24 @@ export class WorkflowBudgetImpl implements WorkflowBudget {
   /** The cap on this run alone: only an operator's env cap is per run. */
   runCap(): number | null {
     return this.source === 'env' ? this.total : null;
+  }
+
+  /** Host-only status used by the workflow dispatch admission gate. */
+  providerQuotaState(): { limit: number; used: number | null } | null {
+    if (!this.providerQuota) return null;
+    const used = this.providerQuota.used();
+    if (
+      !this.providerQuotaWarned &&
+      (used === null || used / this.providerQuota.limit >= 0.8)
+    ) {
+      this.providerQuotaWarned = true;
+      debugLogger.warn(
+        used === null
+          ? 'Provider token quota is enabled, but session usage is unknown; optional workflow agent dispatches will be refused.'
+          : `Provider token quota is ${used} / ${this.providerQuota.limit}; optional workflow agent dispatches will stop at the limit.`,
+      );
+    }
+    return { limit: this.providerQuota.limit, used };
   }
 
   remaining(): number {
@@ -211,18 +241,30 @@ export class WorkflowBudgetImpl implements WorkflowBudget {
               turn.outputTokensAtTurnStart,
           )
       : undefined;
+    const providerQuotaLimit = resolveMaxProviderTokensPerSession(env);
+    const providerQuota =
+      providerQuotaLimit === null
+        ? undefined
+        : {
+            limit: providerQuotaLimit,
+            used: () =>
+              sessionId === undefined
+                ? null
+                : uiTelemetryService.getProviderReportedTotalTokens(sessionId),
+          };
     if (turn && turn.budget !== null) {
       return new WorkflowBudgetImpl(turn.budget, {
         source: 'directive',
         turnSpent,
         directiveText: turn.directiveText,
+        providerQuota,
       });
     }
     const envCap = resolveMaxTokensPerWorkflow(env);
     if (envCap !== null) {
-      return new WorkflowBudgetImpl(envCap, { source: 'env' });
+      return new WorkflowBudgetImpl(envCap, { source: 'env', providerQuota });
     }
-    return new WorkflowBudgetImpl(null, { turnSpent });
+    return new WorkflowBudgetImpl(null, { turnSpent, providerQuota });
   }
 }
 

@@ -13,12 +13,33 @@ import { uiTelemetryService } from '../../telemetry/uiTelemetry.js';
 import {
   WorkflowBudgetImpl,
   WorkflowBudgetExceededError,
+  ProviderQuotaExceededError,
+  resolveMaxProviderTokensPerSession,
   resolveMaxTokensPerWorkflow,
   MAX_TOKENS_PER_WORKFLOW_ENV,
+  MAX_PROVIDER_TOKENS_PER_SESSION_ENV,
   HARD_MAX_TOKENS_CEILING,
 } from './workflow-budget.js';
 
 const envCap = (raw: string) => ({ [MAX_TOKENS_PER_WORKFLOW_ENV]: raw });
+const providerCap = (raw: string) => ({
+  [MAX_PROVIDER_TOKENS_PER_SESSION_ENV]: raw,
+});
+
+describe('resolveMaxProviderTokensPerSession', () => {
+  it('accepts positive decimal integers and clamps oversized values', () => {
+    expect(resolveMaxProviderTokensPerSession(providerCap('1000'))).toBe(1000);
+    expect(
+      resolveMaxProviderTokensPerSession({
+        ...providerCap(String(HARD_MAX_TOKENS_CEILING + 1)),
+      }),
+    ).toBe(HARD_MAX_TOKENS_CEILING);
+  });
+
+  it.each(['', '0', '-1', '1.5', '1e3'])('treats %j as unset', (raw) => {
+    expect(resolveMaxProviderTokensPerSession(providerCap(raw))).toBeNull();
+  });
+});
 
 describe('resolveMaxTokensPerWorkflow', () => {
   const resolve = (raw: string) => resolveMaxTokensPerWorkflow(envCap(raw));
@@ -304,5 +325,34 @@ describe('WorkflowBudgetImpl.fromConfig', () => {
     );
     expect(b.source).toBe('env');
     expect(b.total).toBe(5_000);
+  });
+
+  it('gates optional requests using exact provider totals and fails closed when unknown', () => {
+    const { config, sessionId, charge } = session();
+    const budget = WorkflowBudgetImpl.fromConfig(config, providerCap('100'));
+    expect(budget.providerQuotaState?.()).toEqual({ limit: 100, used: 0 });
+    charge(60);
+    expect(budget.providerQuotaState?.()).toEqual({ limit: 100, used: 61 });
+    uiTelemetryService.addEvent(
+      {
+        'event.name': EVENT_API_RESPONSE,
+        model: 'qwen-test',
+        prompt_id: 'p',
+        duration_ms: 1,
+        input_token_count: 5,
+        output_token_count: 5,
+        total_token_count: 0,
+        cached_content_token_count: 0,
+        thoughts_token_count: 0,
+      } as unknown as Parameters<typeof uiTelemetryService.addEvent>[0],
+      sessionId,
+    );
+    expect(budget.providerQuotaState?.()).toEqual({
+      limit: 100,
+      used: null,
+    });
+    expect(new ProviderQuotaExceededError(null, 100).message).toContain(
+      'usage is unknown',
+    );
   });
 });

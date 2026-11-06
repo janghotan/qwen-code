@@ -1,0 +1,232 @@
+{
+  "schemaVersion": 1,
+  "source": "synthetic",
+  "experiment": {
+    "provider": "fixture-provider",
+    "model": "fixture-model",
+    "protocol": "fixture-protocol",
+    "configHash": "synthetic-fixture-v1"
+  },
+  "runs": [
+    {
+      "caseId": "simple-bug-fix",
+      "sampleId": "fixture-1",
+      "metrics": {
+        "inputTokens": 120,
+        "outputTokens": 40,
+        "cachedTokens": 20,
+        "reasoningTokens": 5,
+        "requests": 2,
+        "retries": 0,
+        "subagentRequests": 0,
+        "compactionRequests": 0,
+        "toolCalls": 4,
+        "reportedCostUsd": null
+      },
+      "quality": {
+        "taskCompleted": true,
+        "testsPassed": true,
+        "regressionDefects": 0,
+        "humanReview": "pending"
+      }
+    },
+    {
+      "caseId": "feature",
+      "sampleId": "fixture-1",
+      "metrics": {
+        "inputTokens": 300,
+        "outputTokens": 90,
+        "cachedTokens": 40,
+        "reasoningTokens": 12,
+        "requests": 4,
+        "retries": 0,
+        "subagentRequests": 0,
+        "compactionRequests": 0,
+        "toolCalls": 8,
+        "reportedCostUsd": null
+      },
+      "quality": {
+        "taskCompleted": true,
+        "testsPassed": true,
+        "regressionDefects": 0,
+        "humanReview": "pending"
+      }
+    },
+    {
+      "caseId": "multi-file-feature",
+      "sampleId": "fixture-1",
+      "metrics": {
+        "inputTokens": 600,
+        "outputTokens": 180,
+        "cachedTokens": 80,
+        "reasoningTokens": 30,
+        "requests": 8,
+        "retries": 1,
+        "subagentRequests": 1,
+        "compactionRequests": 0,
+        "toolCalls": 18,
+        "reportedCostUsd": null
+      },
+      "quality": {
+        "taskCompleted": true,
+        "testsPassed": true,
+        "regressionDefects": 0,
+        "humanReview": "pending"
+      }
+    },
+    {
+      "caseId": "complex-debugging",
+      "sampleId": "fixture-1",
+      "metrics": {
+        "inputTokens": 900,
+        "outputTokens": 220,
+        "cachedTokens": 100,
+        "reasoningTokens": 45,
+        "requests": 10,
+        "retries": 1,
+        "subagentRequests": 1,
+        "compactionRequests": 0,
+        "toolCalls": 22,
+        "reportedCostUsd": null
+      },
+      "quality": {
+        "taskCompleted": true,
+        "testsPassed": true,
+        "regressionDefects": 0,
+        "humanReview": "pending"
+      }
+    },
+    {
+      "caseId": "architectural-refactoring",
+      "sampleId": "fixture-1",
+      "metrics": {
+        "inputTokens": 1200,
+        "outputTokens": 260,
+        "cachedTokens": 120,
+        "reasoningTokens": 60,
+        "requests": 12,
+        "retries": 1,
+        "subagentRequests": 2,
+        "compactionRequests": 1,
+        "toolCalls": 28,
+        "reportedCostUsd": null
+      },
+      "quality": {
+        "taskCompleted": true,
+        "testsPassed": true,
+        "regressionDefects": 0,
+        "humanReview": "pending"
+      }
+    },
+    {
+      "caseId": "unit-test-implementation",
+      "sampleId": "fixture-1",
+      "metrics": {
+        "inputTokens": 400,
+        "outputTokens": 150,
+        "cachedTokens": 50,
+        "reasoningTokens": 20,
+        "requests": 5,
+        "retries": 0,
+        "subagentRequests": 0,
+        "compactionRequests": 0,
+        "toolCalls": 11,
+        "reportedCostUsd": null
+      },
+      "quality": {
+        "taskCompleted": true,
+        "testsPassed": true,
+        "regressionDefects": 0,
+        "humanReview": "pending"
+      }
+    },
+    {
+      "caseId": "security-review",
+      "sampleId": "fixture-1",
+      "metrics": {
+        "inputTokens": 800,
+        "outputTokens": 200,
+        "cachedTokens": 100,
+        "reasoningTokens": 50,
+        "requests": 9,
+        "retries": 0,
+        "subagentRequests": 1,
+        "compactionRequests": 0,
+        "toolCalls": 16,
+        "reportedCostUsd": null
+      },
+      "quality": {
+        "taskCompleted": true,
+        "testsPassed": true,
+        "regressionDefects": 0,
+        "humanReview": "pending"
+      }
+    },
+    {
+      "caseId": "large-repository-exploration",
+      "sampleId": "fixture-1",
+      "metrics": {
+        "inputTokens": 1500,
+        "outputTokens": 240,
+        "cachedTokens": 300,
+        "reasoningTokens": 55,
+        "requests": 14,
+        "retries": 1,
+        "subagentRequests": 2,
+        "compactionRequests": 1,
+        "toolCalls": 35,
+        "reportedCostUsd": null
+      },
+      "quality": {
+        "taskCompleted": true,
+        "testsPassed": true,
+        "regressionDefects": 0,
+        "humanReview": "pending"
+      }
+    },
+    {
+      "caseId": "long-session-compaction",
+      "sampleId": "fixture-1",
+      "metrics": {
+        "inputTokens": 1800,
+        "outputTokens": 300,
+        "cachedTokens": 500,
+        "reasoningTokens": 80,
+        "requests": 18,
+        "retries": 1,
+        "subagentRequests": 1,
+        "compactionRequests": 2,
+        "toolCalls": 32,
+        "reportedCostUsd": null
+      },
+      "quality": {
+        "taskCompleted": true,
+        "testsPassed": true,
+        "regressionDefects": 0,
+        "humanReview": "pending"
+      }
+    },
+    {
+      "caseId": "interrupted-session-recovery",
+      "sampleId": "fixture-1",
+      "metrics": {
+        "inputTokens": 700,
+        "outputTokens": 180,
+        "cachedTokens": 80,
+        "reasoningTokens": 35,
+        "requests": 8,
+        "retries": 2,
+        "subagentRequests": 0,
+        "compactionRequests": 0,
+        "toolCalls": 14,
+        "reportedCostUsd": null
+      },
+      "quality": {
+        "taskCompleted": true,
+        "testsPassed": true,
+        "regressionDefects": 0,
+        "humanReview": "pending"
+      }
+    }
+  ]
+}

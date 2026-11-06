@@ -12,7 +12,11 @@ import {
   tildeifyPath,
 } from '@qwen-code/qwen-code-core/utils/paths.js';
 import { theme } from '../semantic-colors.js';
-import { shortAsciiLogo } from './AsciiArt.js';
+import {
+  QWEN_LOGO_COLOR,
+  compactAsciiLogo,
+  shortAsciiLogo,
+} from './AsciiArt.js';
 import { getAsciiArtWidth, getCachedStringWidth } from '../utils/textUtils.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { getRenderableGradientColors } from '../utils/gradientUtils.js';
@@ -103,7 +107,7 @@ export const Header: React.FC<HeaderProps> = ({
   const infoPanelPaddingX = 1;
   const infoPanelBorderWidth = 2; // left + right border
   const infoPanelChromeWidth = infoPanelBorderWidth + infoPanelPaddingX * 2;
-  const minPathLength = 40; // Minimum readable path length
+  const minPathLength = 35; // Minimum readable path length
   const minInfoPanelWidth = minPathLength + infoPanelChromeWidth;
 
   const availableTerminalWidth = Math.max(
@@ -116,8 +120,8 @@ export const Header: React.FC<HeaderProps> = ({
   //   - User supplied custom art but neither tier fits → hide the logo column.
   //     Falling back to the bundled QWEN logo here would silently undo a
   //     white-label deployment on narrow terminals.
-  //   - User supplied no custom art → fall through to `shortAsciiLogo` and let
-  //     the existing width gate decide whether to show or hide it.
+  //   - User supplied no custom art → fall through to responsive bundled tiers
+  //     (standard 28w, compact 20w, or clean wordmark fallback on narrow widths).
   const hasCustomArt = Boolean(customAsciiArt?.small || customAsciiArt?.large);
   const customTier = pickAsciiArtTier(
     customAsciiArt?.small,
@@ -127,7 +131,15 @@ export const Header: React.FC<HeaderProps> = ({
     minInfoPanelWidth,
     getAsciiArtWidth,
   );
-  const displayLogo = customTier ?? (hasCustomArt ? '' : shortAsciiLogo);
+  const bundledTier = pickAsciiArtTier(
+    compactAsciiLogo,
+    shortAsciiLogo,
+    availableTerminalWidth,
+    logoGap,
+    minInfoPanelWidth,
+    getAsciiArtWidth,
+  );
+  const displayLogo = customTier ?? (hasCustomArt ? '' : (bundledTier ?? ''));
   const logoWidth = getAsciiArtWidth(displayLogo);
 
   // Check if we have enough space for logo + gap + minimum info panel.
@@ -187,11 +199,13 @@ export const Header: React.FC<HeaderProps> = ({
       marginX={containerMarginX}
       width={availableTerminalWidth}
     >
-      {/* Left side: ASCII logo (only if enough space) */}
+      {/* Left side: logo (only if enough space) */}
       {showLogo && (
         <>
           <Box flexShrink={0}>
-            {gradientColors ? (
+            {!hasCustomArt ? (
+              <Text color={QWEN_LOGO_COLOR}>{displayLogo}</Text>
+            ) : gradientColors ? (
               <Gradient colors={gradientColors}>
                 <Text>{displayLogo}</Text>
               </Gradient>
@@ -213,11 +227,10 @@ export const Header: React.FC<HeaderProps> = ({
         flexGrow={showLogo ? 0 : 1}
         width={showLogo ? availableInfoPanelWidth : undefined}
       >
-        {/* Title line: customBannerTitle (already sanitized) or the default
-            ">_ Qwen Code" brand. Version suffix is always appended. */}
+        {/* The version suffix is always appended. */}
         <Text>
           <Text bold color={theme.text.accent}>
-            {customBannerTitle ? customBannerTitle : '>_ Qwen Code'}
+            {customBannerTitle ? customBannerTitle : 'Engineering Edition'}
           </Text>
           <Text color={theme.text.secondary}> ({versionLabel})</Text>
         </Text>

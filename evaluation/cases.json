@@ -1,0 +1,21 @@
+[
+  { "id": "simple-bug-fix", "category": "Simple bug fix" },
+  { "id": "feature", "category": "Normal feature implementation" },
+  { "id": "multi-file-feature", "category": "Multi-file feature" },
+  { "id": "complex-debugging", "category": "Complex debugging" },
+  {
+    "id": "architectural-refactoring",
+    "category": "Architectural refactoring"
+  },
+  { "id": "unit-test-implementation", "category": "Unit-test implementation" },
+  { "id": "security-review", "category": "Security review" },
+  {
+    "id": "large-repository-exploration",
+    "category": "Large repository exploration"
+  },
+  { "id": "long-session-compaction", "category": "Long-session compaction" },
+  {
+    "id": "interrupted-session-recovery",
+    "category": "Interrupted-session recovery"
+  }
+]

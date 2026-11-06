@@ -861,6 +861,35 @@ describe('<ToolMessage />', () => {
     expect(lastFrame()).toMatch(/MockDiff:--- a\/file\.txt/);
   });
 
+  it('shows successful file changes beside the tool action', () => {
+    const { lastFrame } = renderWithContext(
+      <ToolMessage
+        {...baseProps}
+        name="edit"
+        description="src/app.ts"
+        status={ToolCallStatus.Success}
+        resultDisplay={{
+          fileDiff: 'diff',
+          fileName: 'app.ts',
+          originalContent: null,
+          newContent: '',
+          diffStat: {
+            model_added_lines: 23,
+            model_removed_lines: 3,
+            model_added_chars: 100,
+            model_removed_chars: 10,
+            user_added_lines: 0,
+            user_removed_lines: 0,
+            user_added_chars: 0,
+            user_removed_chars: 0,
+          },
+        }}
+      />,
+      StreamingState.Idle,
+    );
+    expect(lastFrame()).toContain('(+23)(-3)');
+  });
+
   it('renders free-form Advisor guidance in its card', () => {
     const { lastFrame } = renderWithContext(
       <ToolMessage

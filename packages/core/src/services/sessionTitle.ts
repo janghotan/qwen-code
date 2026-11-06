@@ -16,6 +16,7 @@ import {
 import { runSideQuery } from '../utils/sideQuery.js';
 import { stripTerminalControlSequences } from '../utils/terminalSafe.js';
 import { SESSION_TITLE_MAX_LENGTH } from './sessionService.js';
+import { checkProviderQuota } from '../telemetry/provider-quota.js';
 
 const debugLogger = createDebugLogger('SESSION_TITLE');
 
@@ -107,7 +108,8 @@ export type SessionTitleFailureReason =
   | 'empty_history'
   | 'empty_result'
   | 'aborted'
-  | 'model_error';
+  | 'model_error'
+  | 'quota_exceeded';
 
 export type SessionTitleOutcome =
   | { ok: true; title: string; modelUsed: string }
@@ -162,6 +164,14 @@ export async function tryGenerateSessionTitle(
       MAX_CONVERSATION_CHARS,
     );
     if (!conversationText.trim()) return { ok: false, reason: 'empty_history' };
+
+    const quotaError = checkProviderQuota(config.getSessionId?.());
+    if (quotaError) {
+      debugLogger.debug(
+        'Provider quota reached — skipping optional session title generation',
+      );
+      return { ok: false, reason: 'quota_exceeded' };
+    }
 
     const result = await runSideQuery<{ title?: string }>(config, {
       purpose: 'session-title',

@@ -86,6 +86,8 @@ import {
   ExecutionCleanupError,
   type ExecutionEnvironment,
 } from '../../services/execution-environment.js';
+import { uiTelemetryService } from '../../telemetry/uiTelemetry.js';
+import { EVENT_API_RESPONSE } from '../../telemetry/constants.js';
 import {
   content,
   fnCall,
@@ -2363,6 +2365,45 @@ describe('AgentTool', () => {
       expect(textOf(result)).toMatch(error);
       expect(mockSubagentManager.createAgentHeadless).not.toHaveBeenCalled();
     };
+
+    it('refuses to spawn an agent when the provider session quota is exhausted', async () => {
+      const envKey = 'QWEN_CODE_MAX_PROVIDER_TOKENS_PER_SESSION';
+      const previous = process.env[envKey];
+      process.env[envKey] = '100';
+      try {
+        uiTelemetryService.addEvent(
+          {
+            'event.name': EVENT_API_RESPONSE,
+            'event.timestamp': new Date().toISOString(),
+            response_id: 'quota-response',
+            model: 'parent-model',
+            duration_ms: 1,
+            input_token_count: 90,
+            output_token_count: 10,
+            cached_content_token_count: 0,
+            thoughts_token_count: 0,
+            total_token_count: 100,
+            prompt_id: 'quota-prompt',
+          } as Parameters<typeof uiTelemetryService.addEvent>[0],
+          'test-session-id',
+        );
+        loadFirstSubagent();
+
+        const result = await run(fg());
+
+        expectNotLaunched(
+          result,
+          /Provider token quota reached \(100 \/ 100\)/,
+        );
+        expect(result.error?.message).toContain(
+          'Continue this task without spawning agents',
+        );
+      } finally {
+        if (previous === undefined) delete process.env[envKey];
+        else process.env[envKey] = previous;
+        uiTelemetryService.reset();
+      }
+    });
     /** Registry whose 'fork-entry' is a running backgrounded ancestor. */
     const forkEntryRegistry = () => {
       const registry = config.getBackgroundTaskRegistry() as unknown as {

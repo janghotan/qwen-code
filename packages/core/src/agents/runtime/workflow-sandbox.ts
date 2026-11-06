@@ -678,6 +678,8 @@ export interface WorkflowBudget {
    */
   runSpent?(): number;
   runCap?(): number | null;
+  /** Host-only provider quota state; never bridged into workflow code. */
+  providerQuotaState?(): { limit: number; used: number | null } | null;
 }
 
 /**

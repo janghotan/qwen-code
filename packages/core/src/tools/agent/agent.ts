@@ -31,6 +31,7 @@ import type { PermissionDecision } from '../../permissions/types.js';
 import type { SubagentManager } from '../../subagents/subagent-manager.js';
 import type { SubagentConfig } from '../../subagents/types.js';
 import { BUBBLE_APPROVAL_MODE } from '../../subagents/types.js';
+import { checkProviderQuota } from '../../telemetry/provider-quota.js';
 import { AgentTerminateMode } from '../../agents/runtime/agent-types.js';
 import type {
   PromptConfig,
@@ -2681,6 +2682,13 @@ class AgentToolInvocation extends BaseToolInvocation<AgentParams, ToolResult> {
         returnDisplay: message,
         error: { message },
       };
+    }
+    const quotaError = checkProviderQuota(this.config.getSessionId());
+    if (quotaError) {
+      return this.buildSpawnBlockedResult(
+        quotaError.message,
+        'Provider token quota reached',
+      );
     }
     const sessionWorkflowAgent =
       this.config.getSessionWorkflowPlanRevision?.() !== undefined;

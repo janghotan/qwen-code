@@ -403,6 +403,7 @@ export interface UiTelemetryReplaySnapshot {
   /** Absent when the session had no bucket yet — restore removes it again. */
   readonly sessionMetrics: SessionMetrics | undefined;
   readonly sessionWasClosed: boolean;
+  readonly sessionProviderReportedTokens: number | null | undefined;
   /**
    * The session the process was on when the replay began — the one a failed
    * swap rolls back to. Absent when no session was initialized yet (the
@@ -416,6 +417,7 @@ export interface UiTelemetryReplaySnapshot {
   /** Absent when the outgoing session had no bucket yet — restore removes it. */
   readonly outgoingSessionMetrics?: SessionMetrics | undefined;
   readonly outgoingSessionWasClosed?: boolean;
+  readonly outgoingSessionProviderReportedTokens?: number | null;
   readonly lastPromptTokenCount: number;
   readonly lastCachedContentTokenCount: number;
 }
@@ -424,6 +426,7 @@ export class UiTelemetryService extends EventEmitter {
   static readonly #MAX_CLOSED_SESSIONS = 1000;
   #metrics: SessionMetrics = createInitialMetrics();
   #sessionMetrics: Map<string, SessionMetrics> = new Map();
+  #providerReportedTokens = new Map<string, number | null>();
   #closedSessions: Set<string> = new Set();
   #lastPromptTokenCount = 0;
   #lastCachedContentTokenCount = 0;
@@ -441,6 +444,18 @@ export class UiTelemetryService extends EventEmitter {
         event,
         sessionId,
       );
+      const providerTotal = (event as ApiResponseEvent).total_token_count;
+      if (typeof providerTotal === 'number') {
+        const previous = this.#providerReportedTokens.has(sessionId)
+          ? this.#providerReportedTokens.get(sessionId)!
+          : 0;
+        this.#providerReportedTokens.set(
+          sessionId,
+          previous === null || providerTotal <= 0
+            ? null
+            : previous + providerTotal,
+        );
+      }
     }
 
     this.emit('update', {
@@ -475,6 +490,14 @@ export class UiTelemetryService extends EventEmitter {
     return total;
   }
 
+  /** Returns an exact provider total, or null once a response omits a positive total. */
+  getProviderReportedTotalTokens(sessionId: string): number | null {
+    if (this.#closedSessions.has(sessionId)) return null;
+    return this.#providerReportedTokens.has(sessionId)
+      ? this.#providerReportedTokens.get(sessionId)!
+      : 0;
+  }
+
   restoreSessionModelMetrics(
     sessionId: string,
     models: SessionMetrics['models'],
@@ -485,7 +508,12 @@ export class UiTelemetryService extends EventEmitter {
     );
     // A warm owner already includes these requests. A cold owner restores
     // the Session ledger without charging historical requests to this process.
-    if (this.getTotalOutputTokens(sessionId) >= restoredTotal) return;
+    if (
+      this.#providerReportedTokens.has(sessionId) &&
+      this.getTotalOutputTokens(sessionId) >= restoredTotal
+    ) {
+      return;
+    }
     const metrics =
       this.#sessionMetrics.get(sessionId) ?? createInitialMetrics();
     metrics.models = cloneSessionMetrics({
@@ -496,6 +524,7 @@ export class UiTelemetryService extends EventEmitter {
     // with an authoritative count containing only subsequent live requests.
     delete metrics.billableOutputTokens;
     this.#sessionMetrics.set(sessionId, metrics);
+    this.#providerReportedTokens.set(sessionId, null);
     this.#closedSessions.delete(sessionId);
   }
 
@@ -582,12 +611,17 @@ export class UiTelemetryService extends EventEmitter {
         ? cloneSessionMetrics(sessionMetrics)
         : undefined,
       sessionWasClosed: this.#closedSessions.has(sessionId),
+      sessionProviderReportedTokens:
+        this.#providerReportedTokens.get(sessionId),
       outgoingSessionId: outgoing,
       outgoingSessionMetrics: outgoingSessionMetrics
         ? cloneSessionMetrics(outgoingSessionMetrics)
         : undefined,
       outgoingSessionWasClosed: outgoing
         ? this.#closedSessions.has(outgoing)
+        : undefined,
+      outgoingSessionProviderReportedTokens: outgoing
+        ? this.#providerReportedTokens.get(outgoing)
         : undefined,
       lastPromptTokenCount: this.#lastPromptTokenCount,
       lastCachedContentTokenCount: this.#lastCachedContentTokenCount,
@@ -609,12 +643,14 @@ export class UiTelemetryService extends EventEmitter {
       snapshot.sessionId,
       snapshot.sessionMetrics,
       snapshot.sessionWasClosed,
+      snapshot.sessionProviderReportedTokens,
     );
     if (snapshot.outgoingSessionId) {
       this.#restoreSessionState(
         snapshot.outgoingSessionId,
         snapshot.outgoingSessionMetrics,
         snapshot.outgoingSessionWasClosed,
+        snapshot.outgoingSessionProviderReportedTokens,
       );
     }
     this.#lastPromptTokenCount = snapshot.lastPromptTokenCount;
@@ -629,6 +665,7 @@ export class UiTelemetryService extends EventEmitter {
     sessionId: string,
     metrics: SessionMetrics | undefined,
     wasClosed: boolean | undefined,
+    providerReportedTokens: number | null | undefined,
   ): void {
     if (metrics) {
       this.#sessionMetrics.set(sessionId, cloneSessionMetrics(metrics));
@@ -636,6 +673,11 @@ export class UiTelemetryService extends EventEmitter {
       // No bucket existed before the replay; the replay created one. Drop it
       // rather than leave an empty bucket that reads as a live session.
       this.#sessionMetrics.delete(sessionId);
+    }
+    if (providerReportedTokens === undefined) {
+      this.#providerReportedTokens.delete(sessionId);
+    } else {
+      this.#providerReportedTokens.set(sessionId, providerReportedTokens);
     }
     if (wasClosed) {
       this.#closedSessions.add(sessionId);
@@ -650,6 +692,7 @@ export class UiTelemetryService extends EventEmitter {
   reset(): void {
     this.#metrics = createInitialMetrics();
     this.#sessionMetrics.clear();
+    this.#providerReportedTokens.clear();
     this.#closedSessions.clear();
     this.#lastPromptTokenCount = 0;
     this.#lastCachedContentTokenCount = 0;
@@ -662,11 +705,13 @@ export class UiTelemetryService extends EventEmitter {
 
   resetSession(sessionId: string): void {
     this.#sessionMetrics.set(sessionId, createInitialMetrics());
+    this.#providerReportedTokens.set(sessionId, 0);
     this.#closedSessions.delete(sessionId);
   }
 
   removeSession(sessionId: string): void {
     this.#sessionMetrics.delete(sessionId);
+    this.#providerReportedTokens.delete(sessionId);
     this.#closedSessions.add(sessionId);
     if (this.#closedSessions.size > UiTelemetryService.#MAX_CLOSED_SESSIONS) {
       const oldest = this.#closedSessions.values().next().value;

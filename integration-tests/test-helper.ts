@@ -343,10 +343,22 @@ export class TestRig {
   run(
     promptOrOptions:
       | string
-      | { prompt?: string; stdin?: string; stdinDoesNotEnd?: boolean },
+      | {
+          prompt?: string;
+          stdin?: string;
+          stdinDoesNotEnd?: boolean;
+          /** Keep the recorded conversation so a later `--continue` can read it. */
+          chatRecording?: boolean;
+        },
     ...args: string[]
   ): Promise<string> {
-    const { command, initialArgs } = this._getCommandAndArgs(['--yolo']);
+    const chatRecording =
+      typeof promptOrOptions === 'object' &&
+      promptOrOptions !== null &&
+      promptOrOptions.chatRecording === true;
+    const { command, initialArgs } = this._getCommandAndArgs(['--yolo'], {
+      chatRecording,
+    });
     const commandArgs = [...initialArgs];
     const execOptions: {
       cwd: string;

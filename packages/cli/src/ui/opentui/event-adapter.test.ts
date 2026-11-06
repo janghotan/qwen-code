@@ -125,11 +125,21 @@ describe('event-adapter (ServerGeminiStreamEvent -> neutral)', () => {
   it('carries FileDiff resultDisplay as a structured diff payload', () => {
     const map = createEventMapper();
     const fileDiff = '@@ -1,1 +1,1 @@\n-old\n+new';
+    const diffStat = {
+      model_added_lines: 23,
+      model_removed_lines: 3,
+      model_added_chars: 100,
+      model_removed_chars: 10,
+      user_added_lines: 0,
+      user_removed_lines: 0,
+      user_added_chars: 0,
+      user_removed_chars: 0,
+    };
     const out = map({
       type: 'tool_call_response',
       value: {
         callId: 'c1',
-        resultDisplay: { fileDiff, fileName: 'a.txt' },
+        resultDisplay: { fileDiff, fileName: 'a.txt', diffStat },
       },
     } as unknown as AnyEv);
     expect(out).toEqual([
@@ -137,7 +147,11 @@ describe('event-adapter (ServerGeminiStreamEvent -> neutral)', () => {
         type: 'tool-result',
         id: 'c1',
         display: '',
-        diff: { fileDiff, fileName: 'a.txt' },
+        diff: {
+          fileDiff,
+          fileName: 'a.txt',
+          diffStat: { model_added_lines: 23, model_removed_lines: 3 },
+        },
       },
       { type: 'tool-end', id: 'c1', success: true, summary: 'ok' },
     ]);

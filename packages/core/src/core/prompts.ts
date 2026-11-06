@@ -922,6 +922,17 @@ When you encounter an obstacle, do not use destructive actions as a shortcut to 
  * `postCompactAttachments.ts` so the summary model does not re-generate
  * it every compaction.
  */
+/**
+ * 上下文压缩系统提示词：
+ * 当对话上下文接近溢出阈值时调用此提示词生成压缩摘要。
+ * 此摘要将成为后续代理在上下文裁剪后的核心记忆。
+ * 针对工程任务强化了关键维度的保留：
+ * - 明确的用户约束与优先级（如正确性优于削减Token、离线测试约束等）；
+ * - 系统架构决策与不变式；
+ * - 已修改文件的确切相对路径、关键符号锚点及Diff状态（防止重新探索已修改代码）；
+ * - 根因分析（区分已知根因与被证伪的假设，避免重复试错）；
+ * - 未竟任务与完成前必须运行的验证命令。
+ */
 export function getCompressionPrompt(): string {
   return `
 You are the component that summarizes a conversation when its context window is about to overflow. The summary you produce will become the agent's ONLY memory of everything that happened before this point. The agent will resume its work based solely on this summary plus a small number of restored file / image attachments that follow.
@@ -932,23 +943,23 @@ Then produce the final summary as the EXACT XML structure below. Be dense. Omit 
 
 <state_snapshot>
     <primary_request_and_intent>
-        <!-- Capture all of the user's explicit requests and intents in detail. Quote the user's exact phrasing where intent is at stake. -->
+        <!-- Capture all of the user's explicit requests and intents in detail. Quote the user's exact phrasing where intent is at stake. Include explicit non-negotiable constraints, rules, language policies, and priorities (e.g. correctness first). -->
     </primary_request_and_intent>
 
     <key_technical_concepts>
-        <!-- List all important technical concepts, technologies, and frameworks discussed. -->
+        <!-- List all important technical concepts, technologies, frameworks, architectural invariants, and permanent project boundaries established during the conversation. -->
     </key_technical_concepts>
 
     <files_and_code_sections>
-        <!-- Enumerate specific files and code sections examined, modified, or created. Pay special attention to the most recent messages. Include full code snippets where applicable, and a summary of why this file read or edit is important. -->
+        <!-- Enumerate specific files and code sections examined, modified, or created. For modified files, record the exact relative paths, modified functions/symbols, line anchors, and active diff summaries so the subsequent agent does not re-read or duplicate edits. Include full code snippets where applicable, and a summary of why this file read or edit is important. -->
     </files_and_code_sections>
 
     <errors_and_fixes>
-        <!-- List every error encountered and how it was fixed. Include the verbatim error message when it was quoted to the agent. Pay special attention to specific user feedback on the error, especially if the user told you to do something differently. -->
+        <!-- List every error encountered, verified root cause vs symptoms, failed hypotheses (to avoid repeating disproven paths), and how it was fixed. Include the verbatim error message when it was quoted to the agent. Pay special attention to specific user feedback on the error, especially if the user told you to do something differently. -->
     </errors_and_fixes>
 
     <problem_solving>
-        <!-- Document problems solved and any ongoing troubleshooting efforts. -->
+        <!-- Document problems solved, active troubleshooting hypotheses, root causes confirmed, and exact verification commands (tests, lint, build) used to validate solutions. -->
     </problem_solving>
 
     <all_user_messages>
@@ -956,7 +967,7 @@ Then produce the final summary as the EXACT XML structure below. Be dense. Omit 
     </all_user_messages>
 
     <pending_tasks>
-        <!-- Outline any pending tasks that the user has explicitly asked the agent to work on but that are not yet complete. -->
+        <!-- Outline any pending tasks that the user has explicitly asked the agent to work on but that are not yet complete. Include pending multi-file updates and required verification checks. -->
     </pending_tasks>
 
     <current_work>

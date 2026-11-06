@@ -33,7 +33,10 @@ import type {
   WorkflowMeta,
   WorkflowOrchestratorEmitter,
 } from './workflow-sandbox.js';
-import { WorkflowBudgetExceededError } from './workflow-budget.js';
+import {
+  ProviderQuotaExceededError,
+  WorkflowBudgetExceededError,
+} from './workflow-budget.js';
 import {
   isWorkflowAgentFailedError,
   isWorkflowRunLevelError,
@@ -2259,6 +2262,14 @@ export class WorkflowOrchestrator {
       current: undefined,
     };
 
+    const providerQuotaError = (): ProviderQuotaExceededError | undefined => {
+      const quota = budget?.providerQuotaState?.();
+      if (!quota || (quota.used !== null && quota.used < quota.limit)) {
+        return undefined;
+      }
+      return new ProviderQuotaExceededError(quota.used, quota.limit);
+    };
+
     const countedDispatch: WorkflowCountedDispatch = async (
       prompt,
       opts,
@@ -2450,6 +2461,8 @@ export class WorkflowOrchestrator {
           new WorkflowBudgetExceededError(runId, budget.total, budget.spent()),
         );
       }
+      const quotaError = providerQuotaError();
+      if (quotaError) return rejectThroughPauseGate(quotaError);
       // P5 R3 (wenshao #7): agent-count cap runs AFTER the budget gate.
       // See the reordering rationale at the top of countedDispatch.
       if (agentCount >= maxAgents) {
@@ -2524,6 +2537,8 @@ export class WorkflowOrchestrator {
                 budget.spent(),
               );
             }
+            const quotaError = providerQuotaError();
+            if (quotaError) throw quotaError;
             if (
               journal &&
               journalKey !== undefined &&

@@ -206,7 +206,8 @@ describe('<AppHeader />', () => {
 
   it('shows the header with all info when banner is visible', () => {
     const { lastFrame } = renderWithProviders(createMockUIState());
-    expect(lastFrame()).toContain('>_ Qwen Code');
+    expect(lastFrame()).toContain('Engineering Edition');
+    expect(lastFrame()).not.toContain('>_ Qwen Code');
     expect(lastFrame()).toContain('Gemini Pro');
     expect(lastFrame()).toContain('/projects/qwen-code');
   });

@@ -30,7 +30,11 @@ import {
 import type { LoadedSettings } from '../../config/settings.js';
 import { formatVersionLabel } from '../../utils/version.js';
 import { C, GRADIENT, THEME_REVISION } from './theme.js';
-import { shortAsciiLogo } from '../components/AsciiArt.js';
+import {
+  QWEN_LOGO_COLOR,
+  compactAsciiLogo,
+  shortAsciiLogo,
+} from '../components/AsciiArt.js';
 import { getAsciiArtWidth, getCachedStringWidth } from '../utils/textUtils.js';
 import {
   pickAsciiArtTier,
@@ -111,6 +115,23 @@ function GradientLogo({ logo }: { logo: string }) {
   );
 }
 
+function SolidLogo({ logo, color }: { logo: string; color: string }) {
+  const lines = logo.replace(/^\n/, '').split('\n');
+  return (
+    <box flexDirection="column" flexShrink={0}>
+      {lines.map((line, li) => (
+        <box key={li} flexDirection="row">
+          {[...line].map((ch, ci) => (
+            <text key={ci} fg={color}>
+              {ch}
+            </text>
+          ))}
+        </box>
+      ))}
+    </box>
+  );
+}
+
 /**
  * Faithful port of the ink `Header`: a single-border info panel with title,
  * optional subtitle/spacer, auth|model(+hint), and directory —
@@ -152,12 +173,12 @@ function buildBanner(
   const containerMarginX = 2;
   const logoGap = 2;
   const infoPanelChromeWidth = 2 + 1 * 2; // border(2) + paddingX(1*2)
-  const minInfoPanelWidth = 40 + infoPanelChromeWidth;
+  const minInfoPanelWidth = 35 + infoPanelChromeWidth;
   const available = Math.max(0, width - containerMarginX * 2);
   // ink Header parity: a fitting custom tier wins; custom art that fits
   // nowhere hides the logo column (no silent fallback to the bundled logo —
   // that would undo a white-label deployment on narrow terminals); no custom
-  // art falls through to the bundled shortAsciiLogo.
+  // art falls through to responsive bundled tiers (standard 28w, compact 20w, or wordmark fallback).
   const hasCustomArt = Boolean(custom.asciiArt.small || custom.asciiArt.large);
   const customTier = pickAsciiArtTier(
     custom.asciiArt.small,
@@ -167,7 +188,15 @@ function buildBanner(
     minInfoPanelWidth,
     getAsciiArtWidth,
   );
-  const displayLogo = customTier ?? (hasCustomArt ? '' : shortAsciiLogo);
+  const bundledTier = pickAsciiArtTier(
+    compactAsciiLogo,
+    shortAsciiLogo,
+    available,
+    logoGap,
+    minInfoPanelWidth,
+    getAsciiArtWidth,
+  );
+  const displayLogo = customTier ?? (hasCustomArt ? '' : (bundledTier ?? ''));
   const logoWidth = getAsciiArtWidth(displayLogo);
   const showLogo =
     displayLogo !== '' && available >= logoWidth + logoGap + minInfoPanelWidth;
@@ -205,7 +234,7 @@ function buildBanner(
     >
       <box flexDirection="row">
         <text fg={C.accent} attributes={1}>
-          {custom.title ?? '>_ Qwen Code'}
+          {custom.title ?? 'Engineering Edition'}
         </text>
         <text fg={C.dim}>{` (${versionLabel})`}</text>
       </box>
@@ -242,7 +271,11 @@ function buildBanner(
       marginRight={containerMarginX}
       flexShrink={0}
     >
-      <GradientLogo logo={displayLogo} />
+      {hasCustomArt ? (
+        <GradientLogo logo={displayLogo} />
+      ) : (
+        <SolidLogo logo={displayLogo} color={QWEN_LOGO_COLOR} />
+      )}
       <box width={logoGap} />
       {infoPanel}
     </box>
