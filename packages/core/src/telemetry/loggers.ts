@@ -1080,6 +1080,7 @@ export function logContentRetryFailure(
  */
 export function logApiRetry(config: Config, event: ApiRetryEvent): void {
   apiActivityTracker.recordRetry(); // sink 0 — see fan-out above
+  uiTelemetryService.recordRetryAttempt(config.getSessionId());
   QwenLogger.getInstance(config)?.logApiRetryEvent(event);
   if (!isTelemetrySdkInitialized()) return;
 
@@ -1102,6 +1103,7 @@ export function logSubagentExecution(
   config: Config,
   event: SubagentExecutionEvent,
 ): void {
+  uiTelemetryService.recordSubagentInvocation(config.getSessionId());
   QwenLogger.getInstance(config)?.logSubagentExecutionEvent(event);
   if (!isTelemetrySdkInitialized()) return;
 

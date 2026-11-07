@@ -5,6 +5,7 @@
  */
 
 import { EventEmitter } from 'node:events';
+import crypto from 'node:crypto';
 import {
   EVENT_API_ERROR,
   EVENT_API_RESPONSE,
@@ -86,6 +87,79 @@ export interface GenerationMetrics {
   totalThroughputOutputTokens: number;
   last?: GenerationTimingSample;
 }
+
+/**
+ * 结构化的会话请求与调用记账信息。
+ * 明确区分用户交互轮次、模型逻辑生成轮次、底层实际 HTTP 请求数、失败数、重试数、
+ * 工具调用数以及后台辅助推理请求数（如 sessionTitle、toolUseSummary 等），
+ * 彻底消除统计视图中因混合不同计数口径而导致的请求数不一致歧义。
+ */
+export interface RequestAccounting {
+  /** 用户主动发起的提示词交互轮次 */
+  userTurns: number;
+  /** Agent 循环中逻辑模型推理轮次（一轮用户提示可触发多轮模型循环） */
+  logicalGenerations: number;
+  /** 发往服务商的底层实际 HTTP 请求总数（成功响应数 + 错误请求数） */
+  actualHttpRequests: number;
+  /** 成功完成并返回可用输出的服务商响应总数 */
+  successfulResponses: number;
+  /** 发生网络错误、状态码异常或超时失败的服务商请求数 */
+  failedRequests: number;
+  /** 重试尝试次数 */
+  retryAttempts: number;
+  /** 计时且非内部的流式交互生成请求数（即 timedRequests） */
+  timedGenerations: number;
+  /** 模型响应中包含至少一个工具调用的请求数 */
+  toolCallRequests: number;
+  /** 工具实际被执行的次数（对应 tools.totalCalls） */
+  individualToolExecutions: number;
+  /** 子代理被调用的次数 */
+  subagentInvocations: number;
+  /** 子代理发起的模型 API 请求数 */
+  subagentModelRequests: number;
+  /** 内部辅助推理请求数（如标题生成、工具结果摘要、投机推理等，由 isInternalPromptId 标识） */
+  auxiliaryRequests: number;
+}
+
+export const createInitialRequestAccounting = (): RequestAccounting => ({
+  userTurns: 0,
+  logicalGenerations: 0,
+  actualHttpRequests: 0,
+  successfulResponses: 0,
+  failedRequests: 0,
+  retryAttempts: 0,
+  timedGenerations: 0,
+  toolCallRequests: 0,
+  individualToolExecutions: 0,
+  subagentInvocations: 0,
+  subagentModelRequests: 0,
+  auxiliaryRequests: 0,
+});
+
+/**
+ * 提示词前缀稳定性指标（用于监测 Provider Prompt Cache 的有效性）。
+ * 通过跟踪系统静态前缀的 SHA-256 指纹及字符长度来评估前缀漂移，绝不记录任何原始提示词敏感文本。
+ */
+export interface PrefixStabilityMetrics {
+  /** 当前静态前缀的 SHA-256 指纹（前16位字符） */
+  currentPrefixHash: string | null;
+  /** 静态前缀字符长度 */
+  prefixLength: number;
+  /** 前缀保持不变的请求次数 */
+  stableRequests: number;
+  /** 前缀发生变更（导致缓存失效）的次数 */
+  driftCount: number;
+  /** 总请求评估次数 */
+  totalEvaluated: number;
+}
+
+export const createInitialPrefixStability = (): PrefixStabilityMetrics => ({
+  currentPrefixHash: null,
+  prefixLength: 0,
+  stableRequests: 0,
+  driftCount: 0,
+  totalEvaluated: 0,
+});
 
 /**
  * Per-model counters without the nested source breakdown. Used both as the
@@ -204,6 +278,10 @@ export interface SessionMetrics {
     totalLinesRemoved: number;
   };
   skills?: SkillMetrics;
+  /** 会话维度的请求分类记账指标 */
+  requestAccounting?: RequestAccounting;
+  /** 提示词前缀稳定性指标 */
+  prefixStability?: PrefixStabilityMetrics;
 }
 
 const createInitialModelMetricsCore = (): ModelMetricsCore => ({
@@ -286,6 +364,9 @@ const cloneSessionMetrics = (metrics: SessionMetrics): SessionMetrics => {
       );
     }
   }
+  if (clone.requestAccounting) {
+    clone.requestAccounting = { ...clone.requestAccounting };
+  }
   return clone;
 };
 
@@ -354,6 +435,8 @@ const getLegacySubagentId = (
 
 const createInitialMetrics = (): SessionMetrics => ({
   models: {},
+  requestAccounting: createInitialRequestAccounting(),
+  prefixStability: createInitialPrefixStability(),
   tools: {
     totalCalls: 0,
     totalSuccess: 0,
@@ -577,6 +660,192 @@ export class UiTelemetryService extends EventEmitter {
   }
 
   /**
+   * 记录一轮由用户直接发起的交互（即用户在提示输入框中提交一条消息）。
+   */
+  recordUserTurn(sessionId?: string): void {
+    const buckets = [
+      this.#metrics,
+      ...(sessionId && !this.#closedSessions.has(sessionId)
+        ? [
+            this.#sessionMetrics.get(sessionId) ??
+              (() => {
+                const init = createInitialMetrics();
+                this.#sessionMetrics.set(sessionId, init);
+                return init;
+              })(),
+          ]
+        : []),
+    ];
+    for (const b of buckets) {
+      const accounting = (b.requestAccounting ??=
+        createInitialRequestAccounting());
+      accounting.userTurns++;
+    }
+    this.emit('update', {
+      metrics: this.#metrics,
+      lastPromptTokenCount: this.#lastPromptTokenCount,
+    });
+  }
+
+  /**
+   * 记录一次模型逻辑生成周期（即在 Agent 循环中向模型发起的一轮推进）。
+   */
+  recordLogicalGeneration(sessionId?: string): void {
+    const buckets = [
+      this.#metrics,
+      ...(sessionId && !this.#closedSessions.has(sessionId)
+        ? [
+            this.#sessionMetrics.get(sessionId) ??
+              (() => {
+                const init = createInitialMetrics();
+                this.#sessionMetrics.set(sessionId, init);
+                return init;
+              })(),
+          ]
+        : []),
+    ];
+    for (const b of buckets) {
+      const accounting = (b.requestAccounting ??=
+        createInitialRequestAccounting());
+      accounting.logicalGenerations++;
+    }
+  }
+
+  /**
+   * 记录一次 HTTP 请求重试尝试。
+   */
+  recordRetryAttempt(sessionId?: string): void {
+    const buckets = [
+      this.#metrics,
+      ...(sessionId && !this.#closedSessions.has(sessionId)
+        ? [
+            this.#sessionMetrics.get(sessionId) ??
+              (() => {
+                const init = createInitialMetrics();
+                this.#sessionMetrics.set(sessionId, init);
+                return init;
+              })(),
+          ]
+        : []),
+    ];
+    for (const b of buckets) {
+      const accounting = (b.requestAccounting ??=
+        createInitialRequestAccounting());
+      accounting.retryAttempts++;
+    }
+  }
+
+  /**
+   * 记录一次子代理实例化调用。
+   */
+  recordSubagentInvocation(sessionId?: string): void {
+    const buckets = [
+      this.#metrics,
+      ...(sessionId && !this.#closedSessions.has(sessionId)
+        ? [
+            this.#sessionMetrics.get(sessionId) ??
+              (() => {
+                const init = createInitialMetrics();
+                this.#sessionMetrics.set(sessionId, init);
+                return init;
+              })(),
+          ]
+        : []),
+    ];
+    for (const b of buckets) {
+      const accounting = (b.requestAccounting ??=
+        createInitialRequestAccounting());
+      accounting.subagentInvocations++;
+    }
+  }
+
+  /**
+   * 记录一次包含工具调用的模型响应请求。
+   */
+  recordToolCallRequest(sessionId?: string): void {
+    const buckets = [
+      this.#metrics,
+      ...(sessionId && !this.#closedSessions.has(sessionId)
+        ? [
+            this.#sessionMetrics.get(sessionId) ??
+              (() => {
+                const init = createInitialMetrics();
+                this.#sessionMetrics.set(sessionId, init);
+                return init;
+              })(),
+          ]
+        : []),
+    ];
+    for (const b of buckets) {
+      const accounting = (b.requestAccounting ??=
+        createInitialRequestAccounting());
+      accounting.toolCallRequests++;
+    }
+  }
+
+  /**
+   * 获取会话或全局维度的完整请求统计记账。
+   */
+  getRequestAccounting(sessionId?: string): RequestAccounting {
+    const metrics = sessionId
+      ? (this.#sessionMetrics.get(sessionId) ?? this.#metrics)
+      : this.#metrics;
+    return metrics.requestAccounting ?? createInitialRequestAccounting();
+  }
+
+  /**
+   * 记录静态前缀指纹，评估提示词前缀稳定性（避免在提示词前部注入非幂等内容导致缓存穿透）。
+   * 仅计算哈希指纹，不保留任何明文内容。
+   */
+  recordPrefixStability(prefix: string | undefined, sessionId?: string): void {
+    if (!prefix) return;
+    const hash = crypto
+      .createHash('sha256')
+      .update(prefix)
+      .digest('hex')
+      .slice(0, 16);
+
+    const buckets = [
+      this.#metrics,
+      ...(sessionId && !this.#closedSessions.has(sessionId)
+        ? [
+            this.#sessionMetrics.get(sessionId) ??
+              (() => {
+                const init = createInitialMetrics();
+                this.#sessionMetrics.set(sessionId, init);
+                return init;
+              })(),
+          ]
+        : []),
+    ];
+
+    for (const b of buckets) {
+      const stability = (b.prefixStability ??= createInitialPrefixStability());
+      stability.totalEvaluated++;
+      stability.prefixLength = prefix.length;
+      if (stability.currentPrefixHash === null) {
+        stability.currentPrefixHash = hash;
+        stability.stableRequests = 1;
+      } else if (stability.currentPrefixHash === hash) {
+        stability.stableRequests++;
+      } else {
+        stability.driftCount++;
+        stability.currentPrefixHash = hash;
+      }
+    }
+  }
+
+  /**
+   * 获取前缀稳定性指标。
+   */
+  getPrefixStability(sessionId?: string): PrefixStabilityMetrics {
+    const metrics = sessionId
+      ? (this.#sessionMetrics.get(sessionId) ?? this.#metrics)
+      : this.#metrics;
+    return metrics.prefixStability ?? createInitialPrefixStability();
+  }
+
+  /**
    * Captures everything a session replay is about to overwrite, so a session
    * swap that fails after replaying can put the state back. See
    * {@link UiTelemetryReplaySnapshot} for why a snapshot is the only
@@ -760,6 +1029,16 @@ export class UiTelemetryService extends EventEmitter {
         ? event.input_token_count
         : event.cached_content_token_count;
     const normalizedTotalTokens = getEventTotalTokenCount(event);
+    const accounting = (metrics.requestAccounting ??=
+      createInitialRequestAccounting());
+    accounting.actualHttpRequests++;
+    accounting.successfulResponses++;
+    if (isInternalPromptId(event.prompt_id)) {
+      accounting.auxiliaryRequests++;
+    }
+    if (event.subagent_name && event.subagent_name !== MAIN_SOURCE) {
+      accounting.subagentModelRequests++;
+    }
     const billable = metrics.billableOutputTokens?.[event.model];
     if (billable) {
       const output = getEventBillableOutputTokens(event);
@@ -813,6 +1092,8 @@ export class UiTelemetryService extends EventEmitter {
     ) {
       return;
     }
+
+    accounting.timedGenerations++;
 
     const accumulateGeneration = (generation: GenerationMetrics) => {
       generation.timedRequests++;
@@ -874,6 +1155,17 @@ export class UiTelemetryService extends EventEmitter {
       sourceMetrics,
       ...(invocationMetrics ? [invocationMetrics] : []),
     ];
+
+    const accounting = (metrics.requestAccounting ??=
+      createInitialRequestAccounting());
+    accounting.actualHttpRequests++;
+    accounting.failedRequests++;
+    if (isInternalPromptId(event.prompt_id)) {
+      accounting.auxiliaryRequests++;
+    }
+    if (event.subagent_name && event.subagent_name !== MAIN_SOURCE) {
+      accounting.subagentModelRequests++;
+    }
 
     for (const bucket of buckets) {
       bucket.api.totalRequests++;
@@ -938,6 +1230,9 @@ export class UiTelemetryService extends EventEmitter {
 
   #accumulateToolCall(metrics: SessionMetrics, event: ToolCallEvent): void {
     const { tools, files } = metrics;
+    const accounting = (metrics.requestAccounting ??=
+      createInitialRequestAccounting());
+    accounting.individualToolExecutions++;
     tools.totalCalls++;
     tools.totalDurationMs += event.duration_ms;
 

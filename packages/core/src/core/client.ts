@@ -2252,11 +2252,31 @@ export class LlmClient {
     // the repository does, and providers that only cache at the end of the
     // system message (DashScope) would lose the whole system prompt across
     // sessions. It is announced in the startup prelude instead.
-    this.config.setStaticSystemPrefix(assembleSystemPrompt(stableLayers));
+    const staticPrefix = assembleSystemPrompt(stableLayers);
+    this.config.setStaticSystemPrefix(staticPrefix);
+    uiTelemetryService.recordPrefixStability(
+      this.getCacheableSerializedPrefix(),
+      this.initializedSessionId,
+    );
     return assembleSystemPrompt({
       ...stableLayers,
       autoMemory: this.config.getAutoMemoryPrompt(),
     });
+  }
+
+  /**
+   * 构建完整的可缓存常驻前缀（涵盖静态系统指令、项目指令以及适用的工具函数声明结构）。
+   * 使得前缀指纹能够全覆盖影响服务商 Prompt Cache 命中的实际首部结构。
+   */
+  private getCacheableSerializedPrefix(): string {
+    const staticPrefix = this.config.getStaticSystemPrefix() ?? '';
+    const toolRegistry = this.config.getToolRegistry?.();
+    const toolDeclarations = toolRegistry?.getFunctionDeclarations?.() ?? [];
+    if (toolDeclarations.length === 0) {
+      return staticPrefix;
+    }
+    const toolsJson = JSON.stringify(toolDeclarations);
+    return `${staticPrefix}\n---TOOLS---\n${toolsJson}`;
   }
 
   async refreshStartupContextReminder(): Promise<void> {
@@ -3842,6 +3862,14 @@ export class LlmClient {
       SendMessageType.UserQuery,
   ): AsyncGenerator<ServerLlmStreamEvent, Turn> {
     const messageType = options?.type ?? SendMessageType.UserQuery;
+    if (messageType === SendMessageType.UserQuery) {
+      uiTelemetryService.recordUserTurn(this.config.getSessionId());
+    }
+    uiTelemetryService.recordLogicalGeneration(this.config.getSessionId());
+    uiTelemetryService.recordPrefixStability(
+      this.getCacheableSerializedPrefix(),
+      this.config.getSessionId(),
+    );
     const humanInput =
       messageType === SendMessageType.UserQuery &&
       !options?.isConcurrentSideQuery &&

@@ -34,10 +34,14 @@ export const SessionTab: React.FC = () => {
   let totalInput = 0;
   let totalOutput = 0;
   let totalCached = 0;
+  let totalRequests = 0;
+  let totalErrors = 0;
   for (const m of Object.values(metrics.models)) {
     totalInput += m.tokens.prompt;
     totalOutput += m.tokens.candidates;
     totalCached += m.tokens.cached;
+    totalRequests += m.api.totalRequests;
+    totalErrors += m.api.totalErrors;
   }
   const cacheRate = totalInput > 0 ? (totalCached / totalInput) * 100 : 0;
   const generation = metrics.generation;
@@ -145,6 +149,21 @@ export const SessionTab: React.FC = () => {
         </Box>
         <Box>
           <Box width={labelWidth}>
+            <Text color={theme.text.secondary}>{t('API Requests:')}</Text>
+          </Box>
+          <Text color={theme.text.primary}>
+            {totalRequests}{' '}
+            <Text color={theme.text.secondary}>
+              ({generation?.timedRequests ?? totalRequests} {t('turns')}
+              {metrics.requestAccounting?.auxiliaryRequests
+                ? ` · ${metrics.requestAccounting.auxiliaryRequests} ${t('auxiliary')}`
+                : ''}
+              {totalErrors > 0 ? ` · ${totalErrors} ${t('errors')}` : ''})
+            </Text>
+          </Text>
+        </Box>
+        <Box>
+          <Box width={labelWidth}>
             <Text color={theme.text.secondary}>{t('Agent Active:')}</Text>
           </Box>
           <Text color={theme.text.primary}>
@@ -220,7 +239,9 @@ export const SessionTab: React.FC = () => {
           </Box>
           <Box paddingLeft={2}>
             <Box width={26}>
-              <Text color={theme.text.secondary}>» {t('Requests')}:</Text>
+              <Text color={theme.text.secondary}>
+                » {t('Timed Generations')}:
+              </Text>
             </Box>
             <Text color={theme.text.primary}>{generation.timedRequests}</Text>
           </Box>

@@ -442,6 +442,14 @@ export class FileReadCache {
   }
 
   /**
+   * 记录外部文件系统变更（例如 Shell 命令执行、Git 切换、构建工具运行等）。
+   * 递增 writeGeneration，从而通知并安全失效依赖此代数的搜索缓存（如 Grep、Glob 工具）。
+   */
+  recordExternalMutation(): void {
+    this.writeGeneration++;
+  }
+
+  /**
    * Evict entries whose most recent Read (or Write; both set
    * {@link FileReadEntry.lastReadAt}) is older than `minutes`.
    *

@@ -10,6 +10,9 @@ import {
   MAIN_SOURCE,
   MAX_FAILURE_SAMPLES,
   MAX_TIMING_SAMPLES,
+  createInitialRequestAccounting,
+  createInitialPrefixStability,
+  type UiEvent,
 } from './uiTelemetry.js';
 import { ToolCallDecision } from './tool-call-decision.js';
 import type { ApiErrorEvent, ApiResponseEvent } from './types.js';
@@ -211,6 +214,8 @@ describe('UiTelemetryService', () => {
     const metrics = service.getMetrics();
     expect(metrics).toEqual({
       models: {},
+      requestAccounting: createInitialRequestAccounting(),
+      prefixStability: createInitialPrefixStability(),
       tools: {
         totalCalls: 0,
         totalSuccess: 0,
@@ -1699,4 +1704,212 @@ describe('UiTelemetryService.getTotalOutputTokens', () => {
       expect(Object.hasOwn(saved['main'].bySource, source)).toBe(false);
     },
   );
+
+  describe('Request Accounting & Discrepancy Reconciliation', () => {
+    it('accurately distinguishes conversational generations from auxiliary and error requests (85 vs 88 scenario)', () => {
+      const accountingService = new UiTelemetryService();
+      const sessionId = 'session-reconcile';
+
+      // 模拟 85 次正常的会话流式交互响应（包含合法 TTFT 与 generation_ms）
+      for (let i = 0; i < 85; i++) {
+        accountingService.addEvent(
+          apiResponse('qwen3-max', 100, [1000, 50, 1050, 800, 0], {
+            prompt_id: `turn-${i}`,
+            ttft_ms: 200,
+            generation_ms: 1500,
+          }),
+          sessionId,
+        );
+      }
+
+      // 模拟 3 次后台辅助推理请求（例如 sessionTitle 生成，使用 internalPromptId 前缀）
+      for (let i = 0; i < 3; i++) {
+        accountingService.addEvent(
+          apiResponse('qwen3-max', 50, [200, 10, 210, 0, 0], {
+            prompt_id: `side-query:sessionTitle#${i}`,
+          }),
+          sessionId,
+        );
+      }
+
+      const metrics = accountingService.getMetricsForSession(sessionId);
+      const accounting = metrics.requestAccounting!;
+
+      // 模型总请求数为 88（85 会话 + 3 辅助）
+      expect(metrics.models['qwen3-max'].api.totalRequests).toBe(88);
+      expect(accounting.actualHttpRequests).toBe(88);
+      expect(accounting.successfulResponses).toBe(88);
+      expect(accounting.failedRequests).toBe(0);
+
+      // 辅助请求数为 3
+      expect(accounting.auxiliaryRequests).toBe(3);
+
+      // 计时会话流式交互请求数为 85（即 SessionTab 原先显示的 timedRequests）
+      expect(metrics.generation?.timedRequests).toBe(85);
+      expect(accounting.timedGenerations).toBe(85);
+
+      // 两者数学关系完全自洽：88 = 85 (timedGenerations) + 3 (auxiliaryRequests)
+      expect(accounting.timedGenerations + accounting.auxiliaryRequests).toBe(
+        metrics.models['qwen3-max'].api.totalRequests,
+      );
+    });
+
+    it('records user turns, logical generations, tool calls, and retries independently', () => {
+      const accountingService = new UiTelemetryService();
+      const sessionId = 'session-turns';
+
+      accountingService.recordUserTurn(sessionId);
+      accountingService.recordUserTurn(sessionId);
+      accountingService.recordLogicalGeneration(sessionId);
+      accountingService.recordLogicalGeneration(sessionId);
+      accountingService.recordLogicalGeneration(sessionId);
+      accountingService.recordRetryAttempt(sessionId);
+      accountingService.recordSubagentInvocation(sessionId);
+
+      // 添加工具调用事件
+      accountingService.addEvent(
+        toolEvent(fakeToolEvent('read_file', true, 15)),
+        sessionId,
+      );
+
+      const accounting = accountingService.getRequestAccounting(sessionId);
+      expect(accounting.userTurns).toBe(2);
+      expect(accounting.logicalGenerations).toBe(3);
+      expect(accounting.retryAttempts).toBe(1);
+      expect(accounting.subagentInvocations).toBe(1);
+      expect(accounting.individualToolExecutions).toBe(1);
+    });
+
+    it('instruments prefix stability metrics without exposing raw prompt contents', () => {
+      const stabilityService = new UiTelemetryService();
+      const sessionId = 'session-prefix';
+
+      const initialStability = stabilityService.getPrefixStability(sessionId);
+      expect(initialStability.totalEvaluated).toBe(0);
+      expect(initialStability.currentPrefixHash).toBeNull();
+
+      const stablePrefix = 'You are Qwen Code, a senior engineer assistant.';
+      stabilityService.recordPrefixStability(stablePrefix, sessionId);
+
+      let current = stabilityService.getPrefixStability(sessionId);
+      expect(current.totalEvaluated).toBe(1);
+      expect(current.stableRequests).toBe(1);
+      expect(current.driftCount).toBe(0);
+      expect(current.currentPrefixHash).toHaveLength(16);
+      expect(current.prefixLength).toBe(stablePrefix.length);
+
+      // 同一稳定前缀再次发送，stableRequests 递增，未发生漂移
+      stabilityService.recordPrefixStability(stablePrefix, sessionId);
+      current = stabilityService.getPrefixStability(sessionId);
+      expect(current.totalEvaluated).toBe(2);
+      expect(current.stableRequests).toBe(2);
+      expect(current.driftCount).toBe(0);
+
+      // 前缀因配置或模型模式发生漂移变更
+      const mutatedPrefix = 'You are Qwen Code, in architect mode.';
+      stabilityService.recordPrefixStability(mutatedPrefix, sessionId);
+      current = stabilityService.getPrefixStability(sessionId);
+      expect(current.totalEvaluated).toBe(3);
+      expect(current.driftCount).toBe(1);
+      expect(current.currentPrefixHash).toHaveLength(16);
+    });
+
+    it('accurately reconciles multi-provider, retried, failed, streaming, and auxiliary requests without double-counting', () => {
+      const accountingService = new UiTelemetryService();
+      const sessionId = 'session-complex-audit';
+
+      // 1. 用户提问 Turn 1 (使用 qwen3-max)
+      accountingService.recordUserTurn(sessionId);
+      accountingService.recordLogicalGeneration(sessionId);
+
+      // 请求遇到 503 错误并重试
+      accountingService.addEvent(
+        {
+          'event.name': EVENT_API_ERROR,
+          model: 'qwen3-max',
+          duration_ms: 300,
+          status_code: 503,
+          error_type: 'ServiceUnavailable',
+        } as unknown as UiEvent,
+        sessionId,
+      );
+      accountingService.recordRetryAttempt(sessionId);
+
+      // 重试成功 (流式计时交互)
+      accountingService.addEvent(
+        {
+          'event.name': EVENT_API_RESPONSE,
+          model: 'qwen3-max',
+          duration_ms: 1200,
+          generation_ms: 900,
+          ttft_ms: 300,
+          input_token_count: 500,
+          output_token_count: 100,
+          total_token_count: 600,
+          cached_content_token_count: 0,
+          thoughts_token_count: 0,
+          prompt_id: 'turn-1',
+        } as unknown as UiEvent,
+        sessionId,
+      );
+
+      // 2. 内部辅助请求 (使用 fast 模型 side-query:sessionTitle，由 isInternalPromptId 标识)
+      accountingService.addEvent(
+        {
+          'event.name': EVENT_API_RESPONSE,
+          model: 'qwen3-fast',
+          duration_ms: 400,
+          generation_ms: 250,
+          ttft_ms: 150,
+          input_token_count: 300,
+          output_token_count: 20,
+          total_token_count: 320,
+          cached_content_token_count: 0,
+          thoughts_token_count: 0,
+          prompt_id: 'side-query:sessionTitle',
+        } as unknown as UiEvent,
+        sessionId,
+      );
+
+      // 3. 用户提问 Turn 2 (使用第三个服务商模型，例如 deepseek-coder)
+      accountingService.recordUserTurn(sessionId);
+      accountingService.recordLogicalGeneration(sessionId);
+      accountingService.addEvent(
+        {
+          'event.name': EVENT_API_RESPONSE,
+          model: 'deepseek-coder',
+          duration_ms: 1500,
+          generation_ms: 1100,
+          ttft_ms: 400,
+          input_token_count: 800,
+          output_token_count: 250,
+          total_token_count: 1050,
+          cached_content_token_count: 0,
+          thoughts_token_count: 0,
+          prompt_id: 'turn-2',
+        } as unknown as UiEvent,
+        sessionId,
+      );
+
+      const metrics = accountingService.getMetricsForSession(sessionId);
+      const accounting = accountingService.getRequestAccounting(sessionId);
+
+      // 验证各维度计数绝无混淆或重复计算
+      expect(accounting.userTurns).toBe(2);
+      expect(accounting.logicalGenerations).toBe(2);
+      expect(accounting.actualHttpRequests).toBe(4);
+      expect(accounting.successfulResponses).toBe(3);
+      expect(accounting.failedRequests).toBe(1);
+      expect(accounting.retryAttempts).toBe(1);
+      expect(accounting.timedGenerations).toBe(2);
+      expect(accounting.auxiliaryRequests).toBe(1);
+
+      // 跨服务商多模型聚合校验
+      const totalModelRequests =
+        metrics.models['qwen3-max'].api.totalRequests +
+        metrics.models['qwen3-fast'].api.totalRequests +
+        metrics.models['deepseek-coder'].api.totalRequests;
+      expect(totalModelRequests).toBe(accounting.actualHttpRequests);
+    });
+  });
 });

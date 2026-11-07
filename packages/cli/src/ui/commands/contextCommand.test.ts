@@ -2735,4 +2735,56 @@ describe('/context shows three-tier thresholds', () => {
     expect(data.breakdown.thresholds).toBeDefined();
     expect(data.breakdown.thresholds!.auto).toBe(16_000);
   });
+
+  it('breaks down dynamic conversation into user messages and tool results alongside resident prefix', async () => {
+    const config = makeMockConfig(200_000);
+    const history = [
+      {
+        role: 'user',
+        parts: [{ text: 'Please read the configuration file.' }],
+      },
+      {
+        role: 'model',
+        parts: [
+          {
+            functionCall: {
+              name: 'read_file',
+              args: { file_path: 'config.json' },
+            },
+          },
+        ],
+      },
+      {
+        role: 'user',
+        parts: [
+          {
+            functionResponse: {
+              name: 'read_file',
+              response: { output: '{"mode": "production"}' },
+            },
+          },
+        ],
+      },
+    ];
+
+    const mockChat = {
+      getLastPromptTokenCount: () => 500,
+      getLastCachedContentTokenCount: () => 300,
+      isLastPromptTokenCountEstimated: () => false,
+      getHistoryShallow: () => history,
+    };
+    (config as unknown as Record<string, unknown>)['getLlmClient'] = () => ({
+      isInitialized: () => true,
+      getChat: () => mockChat,
+    });
+
+    const data = await collectContextData(config, true);
+    expect(data.breakdown.residentPrefix).toBeGreaterThan(0);
+    expect(data.breakdown.dynamicConversation).toBeGreaterThan(0);
+    expect(data.breakdown.userMessages).toBeGreaterThan(0);
+    expect(data.breakdown.toolResults).toBeGreaterThan(0);
+    expect(data.breakdown.dynamicConversation).toBe(
+      data.breakdown.userMessages! + data.breakdown.toolResults!,
+    );
+  });
 });

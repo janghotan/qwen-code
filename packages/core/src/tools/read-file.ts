@@ -275,10 +275,12 @@ class ReadFileToolInvocation extends BaseToolInvocation<
           return this.unchangedResult(absPath);
         } else if (
           !isFullRead &&
+          status.entry.readResidentInHistory &&
           status.entry.lastReadRange &&
           isSameRange(status.entry.lastReadRange, requestedRange)
         ) {
           // 连续相同范围读取命中快路径，避免向上下文发送重复代码片段
+          // 前提是上一次读取内容仍在上下文中未被压缩或剔除（readResidentInHistory: true）
           debugLogger.debug('hit-range', {
             path: absPath,
             range: requestedRange,

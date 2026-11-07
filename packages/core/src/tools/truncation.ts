@@ -624,17 +624,111 @@ export function isAlreadyTruncated(content: string): boolean {
   );
 }
 
+/**
+ * 为超长输出构建包含首尾与关键错误诊断的结构化日志预览。
+ * 当内容超过 PREVIEW_SIZE_CHARS 且包含多行时：
+ * 1. 保留头部输出（展示初始上下文）；
+ * 2. 从中间截断部分中提取关键诊断行（使用 extractDiagnosticLines 捕获如 FAIL、Error 等）；
+ * 3. 保留尾部输出（展示执行退出信息或汇总）；
+ * 使得模型无需调用 read_file 重新载入全量暂存文件，即可直接在 persisted-output 预览中获知失败原因与行号。
+ */
+function generateStructuredLogPreview(
+  content: string,
+  maxChars = PREVIEW_SIZE_CHARS,
+): string {
+  if (content.length <= maxChars) {
+    return content;
+  }
+
+  const lines = content.split('\n');
+  if (lines.length < 8) {
+    const slice = content.slice(0, maxChars);
+    const lastNewline = slice.lastIndexOf('\n');
+    return (lastNewline > 0 ? slice.slice(0, lastNewline) : slice) + '\n...';
+  }
+
+  // 截取前部与尾部候选行数
+  const headLineCount = Math.min(Math.max(2, Math.floor(lines.length / 20)), 5);
+  const tailLineCount = Math.min(Math.max(3, Math.floor(lines.length / 15)), 8);
+
+  const headLines = lines.slice(0, headLineCount);
+  const tailLines = lines.slice(
+    Math.max(lines.length - tailLineCount, headLineCount),
+  );
+
+  // 从省略区域中提取诊断信息
+  const omittedStart = headLineCount;
+  const omittedEnd = Math.max(omittedStart, lines.length - tailLineCount);
+  const diagnostics = extractDiagnosticLines(
+    lines,
+    omittedStart,
+    omittedEnd,
+    6,
+  );
+
+  let middleBlock = '\n... [CONTENT TRUNCATED] ...\n';
+  if (diagnostics.length > 0) {
+    middleBlock =
+      '\n... [CONTENT TRUNCATED] ...\n[Key Diagnostic Excerpts]:\n' +
+      diagnostics.map((d) => `  (Line ${d.lineIndex}): ${d.text}`).join('\n') +
+      '\n... [CONTENT TRUNCATED] ...\n';
+  }
+
+  const candidate = `${headLines.join('\n')}${middleBlock}${tailLines.join('\n')}`;
+  if (candidate.length <= maxChars) {
+    return candidate;
+  }
+
+  // 若候选组合超出预算，优先保留关键诊断摘录，缩减前部与尾部非诊断上下文行
+  if (diagnostics.length > 0) {
+    const diagnosticSection =
+      '\n... [CONTENT TRUNCATED] ...\n[Key Diagnostic Excerpts]:\n' +
+      diagnostics
+        .slice(0, 4)
+        .map(
+          (d) =>
+            `  (Line ${d.lineIndex}): ${
+              d.text.length > 180 ? d.text.slice(0, 177) + '...' : d.text
+            }`,
+        )
+        .join('\n') +
+      '\n... [CONTENT TRUNCATED] ...\n';
+
+    const remainingBudget = maxChars - diagnosticSection.length;
+    if (remainingBudget > 80) {
+      const compactHead = headLines.slice(0, 2).join('\n');
+      const compactTail = tailLines.slice(-2).join('\n');
+      const halfRemaining = Math.floor(remainingBudget / 2);
+      const headBudget = Math.min(compactHead.length, halfRemaining);
+      const tailBudget = Math.min(
+        compactTail.length,
+        remainingBudget - headBudget,
+      );
+
+      const tunedHead =
+        compactHead.length > headBudget
+          ? compactHead.slice(0, Math.max(0, headBudget - 4)) + '\n...'
+          : compactHead;
+      const tunedTail =
+        compactTail.length > tailBudget
+          ? '...\n' + compactTail.slice(-Math.max(0, tailBudget - 4))
+          : compactTail;
+
+      const compactCandidate = `${tunedHead}${diagnosticSection}${tunedTail}`;
+      if (compactCandidate.length <= maxChars) {
+        return compactCandidate;
+      }
+    }
+  }
+
+  // 若仅诊断块本身就超出限制或无诊断行，回退到平坦截断
+  const slice = content.slice(0, maxChars);
+  const lastNewline = slice.lastIndexOf('\n');
+  return (lastNewline > 0 ? slice.slice(0, lastNewline) : slice) + '\n...';
+}
+
 function generatePreview(content: string): string {
-  let text =
-    content.length <= PREVIEW_SIZE_CHARS
-      ? content
-      : (() => {
-          const slice = content.slice(0, PREVIEW_SIZE_CHARS);
-          const lastNewline = slice.lastIndexOf('\n');
-          return (
-            (lastNewline > 0 ? slice.slice(0, lastNewline) : slice) + '\n...'
-          );
-        })();
+  let text = generateStructuredLogPreview(content, PREVIEW_SIZE_CHARS);
   // Escape tags that could reshape the model-visible structure
   text = text
     .replace(/<\/?persisted-output>/g, (m) => `&lt;${m.slice(1, -1)}&gt;`)

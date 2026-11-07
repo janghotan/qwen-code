@@ -3397,6 +3397,8 @@ export class ShellToolInvocation extends BaseToolInvocation<
       llmContent += `${APPENDED_METADATA_SEPARATOR}${recordArtifactReminder}`;
     }
 
+    await this.notifyPossibleFileMutation(this.params.command, cwd);
+
     return {
       llmContent,
       rawOutputSize,
@@ -3466,6 +3468,29 @@ export class ShellToolInvocation extends BaseToolInvocation<
       return !readOnly;
     } catch {
       return true;
+    }
+  }
+
+  /**
+   * 通知文件读取缓存可能发生了外部文件系统变更。
+   * 当执行非只读 Shell 命令（如构建、写入、包管理、脚本执行等）时调用，
+   * 使得后续的读取检查与依赖写代数的搜索缓存（如 Grep、Glob）安全失效。
+   */
+  private async notifyPossibleFileMutation(
+    command: string,
+    cwd: string,
+  ): Promise<void> {
+    try {
+      const readOnly = await isShellCommandReadOnlyASTInDirectory(
+        stripShellWrapper(command),
+        cwd,
+      );
+      if (!readOnly) {
+        this.config.getFileReadCache?.()?.recordExternalMutation?.();
+      }
+    } catch {
+      // 若 AST 解析异常或无法确认只读状态，按写操作保守处理以确保缓存安全
+      this.config.getFileReadCache?.()?.recordExternalMutation?.();
     }
   }
 
@@ -4229,6 +4254,8 @@ export class ShellToolInvocation extends BaseToolInvocation<
       `promote: registered ${shellId} (pid=${result.pid}) — outputPath=${outputPath}`,
     );
 
+    await this.notifyPossibleFileMutation(commandToExecute, cwd);
+
     return {
       llmContent,
       returnDisplay: `Promoted to background: ${shellId}`,
@@ -4455,15 +4482,19 @@ export class ShellToolInvocation extends BaseToolInvocation<
           } else {
             registry.complete(shellId, result.exitCode ?? 0, endTime);
           }
+          this.config.getFileReadCache?.()?.recordExternalMutation?.();
         });
       },
       (err) => {
         const endTime = Date.now();
-        endStreamThenSettle(outputStream, 'background', shellId, () =>
-          registry.fail(shellId, getErrorMessage(err), endTime),
-        );
+        endStreamThenSettle(outputStream, 'background', shellId, () => {
+          registry.fail(shellId, getErrorMessage(err), endTime);
+          this.config.getFileReadCache?.()?.recordExternalMutation?.();
+        });
       },
     );
+
+    await this.notifyPossibleFileMutation(this.params.command, cwd);
 
     const pidLine = pid !== undefined ? `pid: ${pid}\n` : '';
     return {

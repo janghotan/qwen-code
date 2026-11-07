@@ -763,5 +763,24 @@ describe('GrepTool', () => {
       const third = await run({ pattern: 'world' });
       expect(third.llmContent).toContain('Found 3 matches');
     });
+
+    it('invalidates cache when recordExternalMutation is called by shell executions', async () => {
+      const first = await run({ pattern: 'world' });
+      expect(first.llmContent).toContain('Found 3 matches');
+
+      // 连续第二次搜索命中缓存
+      const second = await run({ pattern: 'world' });
+      expect(second.llmContent).toBe(first.llmContent);
+
+      // 模拟外部 Shell 命令执行产生变更并通知缓存
+      const fileCache = mockConfig.getFileReadCache();
+      const prevGen = fileCache.getWriteGeneration();
+      fileCache.recordExternalMutation();
+      expect(fileCache.getWriteGeneration()).toBe(prevGen + 1);
+
+      // 缓存失效后重新执行搜索
+      const third = await run({ pattern: 'world' });
+      expect(third.llmContent).toContain('Found 3 matches');
+    });
   });
 });

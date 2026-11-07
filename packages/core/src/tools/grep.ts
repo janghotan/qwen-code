@@ -472,6 +472,25 @@ class GrepToolInvocation extends BaseToolInvocation<
       }
     }
 
+    /**
+     * 将搜索结果写入缓存，并记录当前写入代数。
+     */
+    const cacheResult = (matches: GrepMatch[]): GrepMatch[] => {
+      if (!cacheDisabled && fileCache) {
+        if (grepSearchCache.size >= MAX_GREP_CACHE_ENTRIES) {
+          const oldestKey = grepSearchCache.keys().next().value;
+          if (oldestKey !== undefined) {
+            grepSearchCache.delete(oldestKey);
+          }
+        }
+        grepSearchCache.set(cacheKey, {
+          writeGeneration: currentWriteGen,
+          matches: matches.map((m) => ({ ...m })),
+        });
+      }
+      return matches;
+    };
+
     try {
       // --- Strategy 1: git grep ---
       const isGit = isGitRepository(absolutePath);
@@ -528,7 +547,8 @@ class GrepToolInvocation extends BaseToolInvocation<
                 );
             });
           });
-          return this.parseGrepOutput(output, absolutePath);
+          const matches = this.parseGrepOutput(output, absolutePath);
+          return cacheResult(matches);
         } catch (gitError: unknown) {
           debugLogger.debug(
             `GrepLogic: git grep failed: ${getErrorMessage(
@@ -635,7 +655,8 @@ class GrepToolInvocation extends BaseToolInvocation<
             child.on('error', onError);
             child.on('close', onClose);
           });
-          return this.parseGrepOutput(output, absolutePath);
+          const matches = this.parseGrepOutput(output, absolutePath);
+          return cacheResult(matches);
         } catch (grepError: unknown) {
           debugLogger.debug(
             `GrepLogic: System grep failed: ${getErrorMessage(
@@ -694,20 +715,7 @@ class GrepToolInvocation extends BaseToolInvocation<
         }
       }
 
-      if (!cacheDisabled && fileCache) {
-        if (grepSearchCache.size >= MAX_GREP_CACHE_ENTRIES) {
-          const oldestKey = grepSearchCache.keys().next().value;
-          if (oldestKey !== undefined) {
-            grepSearchCache.delete(oldestKey);
-          }
-        }
-        grepSearchCache.set(cacheKey, {
-          writeGeneration: currentWriteGen,
-          matches: allMatches.map((m) => ({ ...m })),
-        });
-      }
-
-      return allMatches;
+      return cacheResult(allMatches);
     } catch (error: unknown) {
       debugLogger.error(
         `GrepLogic: Error in performGrepSearch (Strategy: ${strategyUsed}): ${getErrorMessage(

@@ -346,6 +346,12 @@ interface ConversationBilling {
   billedListingTexts: ReadonlySet<string>;
 }
 
+interface ConversationDetailedTokens {
+  total: number;
+  userMessages: number;
+  toolResults: number;
+}
+
 /**
  * Content estimate of the conversation after the startup prelude. A part whose
  * cost another category already owns is skipped here: tracked skill bodies and
@@ -357,19 +363,22 @@ interface ConversationBilling {
 function estimateConversationTokens(
   conversation: Content[],
   billing: ConversationBilling,
-): number {
-  let tokens = 0;
+): ConversationDetailedTokens {
+  let userMessages = 0;
+  let toolResults = 0;
   // The historical body map bills each distinct body once under skills.
   const remainingSkillBodies = new Set(billing.billedSkillBodies);
   for (const content of conversation) {
     for (const part of content.parts ?? []) {
       if (typeof part.text === 'string') {
         if (billing.billedListingTexts.has(part.text)) continue;
-        tokens += estimateContextTextTokens(part.text);
+        userMessages += estimateContextTextTokens(part.text);
       } else if (part.inlineData || part.fileData) {
-        tokens += billing.imageTokenEstimate;
+        userMessages += billing.imageTokenEstimate;
       } else if (part.functionCall) {
-        tokens += estimateContextTextTokens(JSON.stringify(part.functionCall));
+        toolResults += estimateContextTextTokens(
+          JSON.stringify(part.functionCall),
+        );
       } else if (part.functionResponse) {
         if (
           part.functionResponse.name === ToolNames.SKILL &&
@@ -377,14 +386,18 @@ function estimateConversationTokens(
         ) {
           continue;
         }
-        tokens += estimateFunctionResponseTokens(
+        toolResults += estimateFunctionResponseTokens(
           part,
           billing.imageTokenEstimate,
         );
       }
     }
   }
-  return tokens;
+  return {
+    total: userMessages + toolResults,
+    userMessages,
+    toolResults,
+  };
 }
 
 export async function collectContextData(
@@ -599,12 +612,13 @@ export async function collectContextData(
     skills.push({ name: entry.name, tokens: entry.tokens, loaded: false });
   }
 
-  conversationTokens = estimateConversationTokens(conversationHistory, {
+  const detailedConversation = estimateConversationTokens(conversationHistory, {
     imageTokenEstimate: resolveSlimmingConfig(config.getChatCompression?.())
       .imageTokenEstimate,
     billedSkillBodies,
     billedListingTexts: tailSkillListings.billedTexts,
   });
+  conversationTokens = detailedConversation.total;
 
   const skillsTokens =
     skillToolDefinitionTokens + skillListing.tokens + loadedBodiesTokens;
@@ -704,6 +718,10 @@ export async function collectContextData(
     skills: clampedSkills,
     startupContext: startupContextTokens,
     messages: conversationTokens,
+    residentPrefix: rawOverhead,
+    dynamicConversation: conversationTokens,
+    userMessages: detailedConversation.userMessages,
+    toolResults: detailedConversation.toolResults,
     cachedTokens: hasTokenCount ? apiCachedTokens : 0,
     freeSpace,
     autocompactBuffer,
@@ -890,6 +908,31 @@ export function formatContextUsageText(data: HistoryItemContextUsage): string {
     lines.push(
       fmtCategoryRow('Messages', breakdown.messages, contextWindowSize),
     );
+    if (
+      showDetails &&
+      ((breakdown.userMessages ?? 0) > 0 || (breakdown.toolResults ?? 0) > 0)
+    ) {
+      if ((breakdown.userMessages ?? 0) > 0) {
+        lines.push(
+          fmtCategoryRow(
+            'User/Assistant text',
+            breakdown.userMessages!,
+            contextWindowSize,
+            '  └ ',
+          ),
+        );
+      }
+      if ((breakdown.toolResults ?? 0) > 0) {
+        lines.push(
+          fmtCategoryRow(
+            'Tool results',
+            breakdown.toolResults!,
+            contextWindowSize,
+            '  └ ',
+          ),
+        );
+      }
+    }
   }
 
   if (showDetails) {
@@ -956,6 +999,29 @@ export function formatContextUsageText(data: HistoryItemContextUsage): string {
           );
         }
       }
+    }
+    if (
+      breakdown.residentPrefix !== undefined &&
+      breakdown.residentPrefix > 0
+    ) {
+      lines.push('');
+      lines.push('**Cacheable Prefix Structure**');
+      lines.push(
+        fmtCategoryRow(
+          'Resident prefix (stable)',
+          breakdown.residentPrefix,
+          contextWindowSize,
+          '  ',
+        ),
+      );
+      lines.push(
+        fmtCategoryRow(
+          'Dynamic conversation',
+          breakdown.dynamicConversation ?? breakdown.messages,
+          contextWindowSize,
+          '  ',
+        ),
+      );
     }
   } else {
     lines.push('');

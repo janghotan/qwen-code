@@ -174,6 +174,8 @@ describe('ShellTool', () => {
   let mockFileReadCache: {
     check: ReturnType<typeof vi.fn>;
     recordWrite: ReturnType<typeof vi.fn>;
+    recordExternalMutation: ReturnType<typeof vi.fn>;
+    getWriteGeneration: ReturnType<typeof vi.fn>;
   };
   /** What `mockConfig.getBackgroundShellRegistry()` returns. */
   let registry: Record<
@@ -344,6 +346,8 @@ describe('ShellTool', () => {
         },
       }),
       recordWrite: vi.fn(),
+      recordExternalMutation: vi.fn(),
+      getWriteGeneration: vi.fn().mockReturnValue(0),
     };
     registry = {
       register: vi.fn(),
@@ -538,6 +542,20 @@ describe('ShellTool', () => {
         ]),
       );
       expectNotCalled(gitSpy, mockExecFile, fetchCurrentBranchPullRequest);
+    });
+
+    it('notifies fileReadCache of external mutations for mutating commands', async () => {
+      vi.mocked(mockFileReadCache.recordExternalMutation).mockClear();
+
+      // 只读命令不触发外部文件系统变更记录
+      const readInvocation = build('cat file.txt');
+      await readInvocation.execute(new AbortController().signal);
+      expect(mockFileReadCache.recordExternalMutation).not.toHaveBeenCalled();
+
+      // 非只读命令（如 npm run build、sed、touch）触发外部变更通知以使搜索和读取缓存安全失效
+      const writeInvocation = build('npm run build');
+      await writeInvocation.execute(new AbortController().signal);
+      expect(mockFileReadCache.recordExternalMutation).toHaveBeenCalledOnce();
     });
 
     it('routes background execution and closes its stream on setup failure', async () => {

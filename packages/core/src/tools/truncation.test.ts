@@ -1014,4 +1014,79 @@ describe('diagnostic-aware truncation', () => {
     );
     expect(result.content).toContain('error TS2322');
   });
+
+  it('preserves key diagnostics in persisted output stub preview without follow-up tool reads', async () => {
+    // 构造超长日志输出（超过 2000 字符且多行），中间带有关键测试失败信息
+    const lines: string[] = [];
+    for (let i = 1; i <= 80; i++) {
+      lines.push(
+        `Step ${i}: Starting worker process and initializing runtime state...`,
+      );
+    }
+    lines.push('FAIL tests/unit/worker.test.ts > failed to process batch task');
+    lines.push('AssertionError: expected status 200 but received 500');
+    for (let i = 83; i <= 150; i++) {
+      lines.push(`Step ${i}: Teardown completed for worker process.`);
+    }
+    lines.push('Finished execution with exit code 1.');
+    const content = lines.join('\n');
+
+    const result = await persistAndTruncateToolResult(
+      'shell',
+      'call-1234',
+      content,
+      {
+        getProjectTempDir: () => '/tmp',
+        getToolResultBytesWritten: () => 0,
+        trackToolResultBytes: () => {},
+      } as unknown as Config,
+    );
+
+    // 检查 persisted-output preview 中直接包含诊断关键行与末尾退出信息
+    expect(result.content).toContain('Preview (up to 2000 chars):');
+    expect(result.content).toContain('[Key Diagnostic Excerpts]:');
+    expect(result.content).toContain(
+      'FAIL tests/unit/worker.test.ts > failed to process batch task',
+    );
+    expect(result.content).toContain('Finished execution with exit code 1.');
+  });
+
+  it('preserves key diagnostics without exceeding budget even when log lines are verbose', async () => {
+    // 构造每行极长（500 字符）的日志，确保 candidate.length 超过 2000 字符限制
+    const lines: string[] = [];
+    for (let i = 1; i <= 20; i++) {
+      lines.push(`Header log verbose line ${i}: ${'x'.repeat(450)}`);
+    }
+    lines.push('FAIL src/auth/verifier.test.ts > token signature mismatch');
+    lines.push('AssertionError: expected valid signature but got invalid_key');
+    for (let i = 23; i <= 40; i++) {
+      lines.push(`Trailer log verbose line ${i}: ${'y'.repeat(450)}`);
+    }
+    lines.push('Build failed with exit code 1');
+    const content = lines.join('\n');
+
+    const result = await persistAndTruncateToolResult(
+      'shell',
+      'call-verbose-5678',
+      content,
+      {
+        getProjectTempDir: () => '/tmp',
+        getToolResultBytesWritten: () => 0,
+        trackToolResultBytes: () => {},
+      } as unknown as Config,
+    );
+
+    // 验证截断文本未丢失关键诊断行
+    expect(result.content).toContain('[Key Diagnostic Excerpts]:');
+    expect(result.content).toContain(
+      'FAIL src/auth/verifier.test.ts > token signature mismatch',
+    );
+    // 验证预览部分严格受限于 2000 字符预算
+    const previewMatch = result.content.match(
+      /Preview \(up to 2000 chars\):\n([\s\S]*?)<\/persisted-output>|Preview \(up to 2000 chars\):\n([\s\S]*)$/,
+    );
+    expect(previewMatch).toBeDefined();
+    const previewText = (previewMatch?.[1] ?? previewMatch?.[2] ?? '').trim();
+    expect(previewText.length).toBeLessThanOrEqual(2000);
+  });
 });

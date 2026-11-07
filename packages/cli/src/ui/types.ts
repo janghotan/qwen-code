@@ -549,6 +549,14 @@ export interface ContextCategoryBreakdown {
    * value, not on this value or on `totalTokens` alone.
    */
   messages: number;
+  /** 常驻前缀（系统指令、工具声明、指令与记忆文件、技能说明等），适合被 Provider Prompt Cache 缓存 */
+  residentPrefix?: number;
+  /** 动态对话历史（用户输入、助手回复与工具返回结果） */
+  dynamicConversation?: number;
+  /** 对话历史中纯用户/助手文本消息的估算 Token 数 */
+  userMessages?: number;
+  /** 对话历史中工具执行结果 (functionResponse) 的估算 Token 数 */
+  toolResults?: number;
   /** @deprecated Legacy residual; accepted in old history but no longer emitted or displayed. */
   unattributed?: number;
   /** Provider-reported cached prefix. An annotation, not a category: the cached prefix spans several categories. */
