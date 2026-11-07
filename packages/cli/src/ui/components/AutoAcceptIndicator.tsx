@@ -29,19 +29,19 @@ export const AutoAcceptIndicator: React.FC<AutoAcceptIndicatorProps> = ({
 
   switch (approvalMode) {
     case ApprovalMode.PLAN:
-      textContent = t('plan mode');
+      textContent = `📋 ${t('plan mode')}`;
       subText = cycleText;
       break;
     case ApprovalMode.AUTO_EDIT:
-      textContent = t('auto-accept edits');
+      textContent = `✍️ ${t('auto-accept edits')}`;
       subText = cycleText;
       break;
     case ApprovalMode.AUTO:
-      textContent = t('Auto mode');
+      textContent = `⚡ ${t('Auto mode')}`;
       subText = cycleText;
       break;
     case ApprovalMode.YOLO:
-      textContent = t('YOLO mode');
+      textContent = `🚀 ${t('YOLO mode')}`;
       subText = cycleText;
       break;
     case ApprovalMode.DEFAULT:

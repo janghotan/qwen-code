@@ -40,23 +40,38 @@ NNNNNNNNNNONNN                 NNNNNNNNN
 `;
 
 /**
- * Standard alphanumeric terminal banner logo reproducing the user-supplied art.
+ * 标准半块字符终端徽标（28 列 x 14 行），精确还原 Qwen 官方莫比乌斯三丝带环拓扑结构。
+ * 显式保留三条丝带之间的负空间切割缝隙与中央倒三角虚空，确保在终端分辨率下依然高度可辨识。
  */
-export const shortAsciiLogo = fullAsciiLogo;
+export const shortAsciiLogo = `
+          ▄█████▄
+         ████████▄▄▄▄▄▄▄▄
+        █████████████████▄
+  ▄▄▄  ███████████████████
+▄█████▄ ▀███████████████▀
+████████             ▄▄▄
+ ████████          ▄█████▄
+  ▀███████▄       ▄███████▄
+   ▀███████▄     ██████████▄
+  ▄█████████▄   ███████████▀
+  ███████████ ▄██████████▀▀
+   ▀████████ ▄███████▀
+             ███████▀
+              █████▀
+`;
 
 /**
- * Controlled compact alphanumeric variant (20 columns x 10 lines) for narrower terminals
- * preserving the triangular void, ribbon arms, and proportional contours with no block characters.
+ * 紧凑型半块字符徽标变体（20 列 x 10 行），适用于窄屏终端，保留三丝带结构与中心负空间。
  */
 export const compactAsciiLogo = `
-      NNNNNN
-     NNNNNNNNNNNNN
- NNNNNNNNNNNNNNNNNN
-NNNNNNNNNNNNNNNNNN
-NNNNNNN      NNNNN
-  NNNNNN    NNNNNNNN
-  NNNNNNN  NNNNNNNNN
- NNNNNNNNNNNNNNNNNN
-  NNNNNNNNNNNNN
-         NNNNN
+       ▄███▄
+      ███████████▄
+ ▄▄▄ █████████████▀
+█████▄▀▀▀▀▀▀▀▀▀▀▀▀
+▀█████▄       ███▄
+ ▀█████▄     ██████
+  ██████▄  ▄████████
+ ▀███████ ▄█████▀▀▀
+  ▀▀▀▀▀▀▀▄█████
+         ▀████
 `;

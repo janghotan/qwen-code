@@ -206,7 +206,12 @@ export function startPostRenderPrefetches(
             });
             return;
           }
-          const installationInfo = getInstallationInfo(projectRoot, true);
+          const isAutoUpdate =
+            settings.merged.general?.enableAutoUpdate === true;
+          const installationInfo = getInstallationInfo(
+            projectRoot,
+            isAutoUpdate,
+          );
           if (installationInfo.packageManager === 'npm') {
             void handleAutoUpdate(result.info, settings, projectRoot);
             return;

@@ -230,7 +230,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* The version suffix is always appended. */}
         <Text>
           <Text bold color={theme.text.accent}>
-            {customBannerTitle ? customBannerTitle : 'Engineering Edition'}
+            {customBannerTitle ? customBannerTitle : '⚡ Engineering Edition'}
           </Text>
           <Text color={theme.text.secondary}> ({versionLabel})</Text>
         </Text>
@@ -242,13 +242,13 @@ export const Header: React.FC<HeaderProps> = ({
         )}
         {/* Auth and Model line */}
         <Text>
-          <Text color={theme.text.secondary}>{authModelText}</Text>
+          <Text color={theme.text.secondary}>🤖 {authModelText}</Text>
           {showModelHint && (
             <Text color={theme.text.secondary}>{modelHintText}</Text>
           )}
         </Text>
         {/* Directory line */}
-        <Text color={theme.text.secondary}>{displayPath}</Text>
+        <Text color={theme.text.secondary}>📁 {displayPath}</Text>
       </Box>
     </Box>
   );

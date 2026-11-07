@@ -56,20 +56,20 @@ describe('AsciiArt', () => {
   });
 
   describe('shortAsciiLogo (standard banner)', () => {
-    it('is bounded in vertical height to 24 lines', () => {
+    it('is bounded in vertical height to 14 lines', () => {
       const lines = shortAsciiLogo.trim().split('\n');
-      expect(lines).toHaveLength(24);
+      expect(lines).toHaveLength(14);
     });
 
-    it('is bounded in width to 45 columns', () => {
+    it('is bounded in width to 28 columns', () => {
       const width = getAsciiArtWidth(shortAsciiLogo);
-      expect(width).toBe(45);
+      expect(width).toBe(28);
     });
 
-    it('preserves the triangular central void using alphanumeric characters', () => {
+    it('preserves the triangular central void using half-blocks', () => {
       const lines = shortAsciiLogo.trim().split('\n');
-      expect(lines[9]).toContain('                 ');
-      expect(lines[23]).toContain('NNNNNNNNN');
+      expect(lines[6]).toContain('        ');
+      expect(lines[0]).toContain('▄█████▄');
     });
 
     it('contains no ANSI escape sequences or control characters', () => {
@@ -90,11 +90,11 @@ describe('AsciiArt', () => {
       expect(width).toBeLessThanOrEqual(20);
     });
 
-    it('uses only alphanumeric characters and preserves central void', () => {
+    it('uses half-block characters and preserves central void', () => {
       const lines = compactAsciiLogo.trim().split('\n');
       expect(lines[4]).toContain('      ');
-      expect(lines[9]).toContain('NNNNN');
-      expect(compactAsciiLogo).not.toContain('█');
+      expect(lines[0]).toContain('▄███▄');
+      expect(compactAsciiLogo).toContain('█');
     });
 
     it('contains no ANSI escape sequences or control characters', () => {

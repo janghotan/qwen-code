@@ -41,10 +41,9 @@ export async function handleAutoUpdate(
     return;
   }
 
-  // enableAutoUpdate is checked in llm.tsx before calling this function,
-  // so if we get here, auto-update is enabled (or undefined, which defaults to enabled).
+  // 仅在明确配置开启自动更新时允许自动执行更新，默认不自动更新
   const isAutoUpdateEnabled =
-    settings.merged.general?.enableAutoUpdate !== false;
+    settings.merged.general?.enableAutoUpdate === true;
 
   const installationInfo = getInstallationInfo(
     projectRoot,

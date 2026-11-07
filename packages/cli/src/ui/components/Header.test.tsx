@@ -38,42 +38,34 @@ describe('<Header />', () => {
   it('renders the bundled blue icon and engineering title on wide terminal', () => {
     const { lastFrame } = render(<Header {...defaultProps} />);
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('NNNNNNNNN');
+    expect(frame).toContain('▄█████▄');
     expect(frame).toContain('Engineering Edition');
     expect(frame).not.toContain('██╔═══██╗');
     expect(frame).not.toContain('>_ Qwen Code');
   });
 
   describe('responsive terminal widths', () => {
-    it('renders the standard 45w alphanumeric ASCII logo at 120 columns', () => {
+    it('renders the standard 28w half-block ASCII logo at 120 columns', () => {
       useTerminalSizeMock.mockReturnValue({ columns: 120, rows: 24 });
       const { lastFrame } = render(<Header {...defaultProps} />);
       const frame = lastFrame() ?? '';
-      expect(frame).toContain('NNNNNNNNN');
+      expect(frame).toContain('▄█████▄');
       expect(frame).toContain('Engineering Edition');
     });
 
-    it('renders the standard 45w alphanumeric ASCII logo at 100 columns', () => {
+    it('renders the standard 28w half-block ASCII logo at 100 columns', () => {
       useTerminalSizeMock.mockReturnValue({ columns: 100, rows: 24 });
       const { lastFrame } = render(<Header {...defaultProps} />);
       const frame = lastFrame() ?? '';
-      expect(frame).toContain('NNNNNNNNN');
+      expect(frame).toContain('▄█████▄');
       expect(frame).toContain('Engineering Edition');
     });
 
-    it('renders the compact alphanumeric ASCII logo at 80 columns', () => {
-      useTerminalSizeMock.mockReturnValue({ columns: 80, rows: 24 });
-      const { lastFrame } = render(<Header {...defaultProps} />);
-      const frame = lastFrame() ?? '';
-      expect(frame).toContain('NNNNNN');
-      expect(frame).toContain('Engineering Edition');
-    });
-
-    it('renders the compact alphanumeric ASCII logo at 70 columns', () => {
+    it('renders the compact half-block ASCII logo at 70 columns', () => {
       useTerminalSizeMock.mockReturnValue({ columns: 70, rows: 24 });
       const { lastFrame } = render(<Header {...defaultProps} />);
       const frame = lastFrame() ?? '';
-      expect(frame).toContain('NNNNNN');
+      expect(frame).toContain('▄███▄');
       expect(frame).toContain('Engineering Edition');
     });
 
@@ -81,7 +73,8 @@ describe('<Header />', () => {
       useTerminalSizeMock.mockReturnValue({ columns: 60, rows: 24 });
       const { lastFrame } = render(<Header {...defaultProps} />);
       const frame = lastFrame() ?? '';
-      expect(frame).not.toContain('NNNNNNNNN');
+      expect(frame).not.toContain('▄█████▄');
+      expect(frame).not.toContain('▄███▄');
       expect(frame).toContain('Engineering Edition');
     });
 
@@ -202,7 +195,7 @@ describe('<Header />', () => {
     const { lastFrame } = render(<Header {...defaultProps} />);
 
     expect(lastFrame()).toContain('Engineering Edition');
-    expect(lastFrame()).toContain('NNNNNNNNN');
+    expect(lastFrame()).toContain('▄█████▄');
   });
 
   it('renders the custom subtitle in place of the blank spacer row', () => {
